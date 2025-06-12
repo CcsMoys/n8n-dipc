@@ -5,4 +5,4 @@ FROM n8nio/n8n:latest
 EXPOSE 5678
 
 # Opcional: Configuración básica no sensible
-ENV N8N_PORT= 5678
+ENV N8N_PORT=
