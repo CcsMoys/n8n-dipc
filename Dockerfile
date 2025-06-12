@@ -1,3 +1,5 @@
+# Dockerfile básico para n8n
+FROM n8nio/n8n:latest
 # Configuración de PostgreSQL (desde tu cadena de conexión)
 DB_TYPE=postgresdb
 DB_POSTGRESDB_DATABASE=neondb
