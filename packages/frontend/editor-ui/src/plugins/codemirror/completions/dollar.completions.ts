@@ -11,7 +11,7 @@ import {
 	isInHttpNodePagination,
 } from './utils';
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { useExternalSecretsStore } from '@/stores/externalSecrets.ee.store';
+import { useExternalSecretsStore } from '@/features/externalSecrets/externalSecrets.ee.store';
 import { escapeMappingString } from '@/utils/mappingUtils';
 import {
 	METADATA_SECTION,
@@ -126,18 +126,20 @@ export function dollarOptions(context: CompletionContext): Completion[] {
 
 	if (receivesNoBinaryData(targetNodeParameterContext?.nodeName)) SKIP.add('$binary');
 
-	const previousNodesCompletions = autocompletableNodeNames().map((nodeName) => {
-		const label = `$('${escapeMappingString(nodeName)}')`;
-		return {
-			label,
-			info: createInfoBoxRenderer({
-				name: label,
-				returnType: 'Object',
-				description: i18n.baseText('codeNodeEditor.completer.$()', { interpolate: { nodeName } }),
-			}),
-			section: PREVIOUS_NODES_SECTION,
-		};
-	});
+	const previousNodesCompletions = autocompletableNodeNames(targetNodeParameterContext).map(
+		(nodeName) => {
+			const label = `$('${escapeMappingString(nodeName)}')`;
+			return {
+				label,
+				info: createInfoBoxRenderer({
+					name: label,
+					returnType: 'Object',
+					description: i18n.baseText('codeNodeEditor.completer.$()', { interpolate: { nodeName } }),
+				}),
+				section: PREVIOUS_NODES_SECTION,
+			};
+		},
+	);
 
 	return recommendedCompletions
 		.concat(ROOT_DOLLAR_COMPLETIONS)

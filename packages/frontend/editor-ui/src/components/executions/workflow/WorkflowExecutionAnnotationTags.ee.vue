@@ -8,6 +8,8 @@ import { createEventBus } from '@n8n/utils/event-bus';
 import type { ExecutionSummary } from 'n8n-workflow';
 import { computed, ref } from 'vue';
 
+import { ElTag } from 'element-plus';
+import { N8nButton } from '@n8n/design-system';
 const props = defineProps<{
 	execution: ExecutionSummary;
 }>();
@@ -103,9 +105,9 @@ const onTagsEditEsc = () => {
 					size="mini"
 					:outline="false"
 					:text="true"
-					@click="onTagsEditEnable"
 					data-test-id="new-tag-link"
 					icon="plus"
+					@click="onTagsEditEnable"
 				/>
 			</div>
 
@@ -119,9 +121,9 @@ const onTagsEditEsc = () => {
 				@click="onTagsEditEnable"
 			>
 				<span v-for="tag in tags" :key="tag.id" class="clickable">
-					<el-tag :title="tag.name" type="info" size="small" :disable-transitions="true">
+					<ElTag :title="tag.name" type="info" size="small" :disable-transitions="true">
 						{{ tag.name }}
-					</el-tag>
+					</ElTag>
 				</span>
 				<span :class="$style.addTagWrapper">
 					<N8nButton
@@ -130,9 +132,9 @@ const onTagsEditEsc = () => {
 						size="mini"
 						:outline="false"
 						:text="true"
-						@click="onTagsEditEnable"
 						data-test-id="new-tag-link"
 						icon="plus"
+						@click="onTagsEditEnable"
 					/>
 				</span>
 			</span>

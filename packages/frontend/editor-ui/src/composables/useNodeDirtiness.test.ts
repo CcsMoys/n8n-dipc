@@ -1,4 +1,3 @@
-/* eslint-disable n8n-local-rules/no-unneeded-backticks */
 import { createTestNode, createTestWorkflow, defaultNodeDescriptions } from '@/__tests__/mocks';
 import { createComponentRenderer } from '@/__tests__/render';
 import { useCanvasOperations } from '@/composables/useCanvasOperations';
@@ -7,20 +6,18 @@ import { useNodeDirtiness } from '@/composables/useNodeDirtiness';
 import { MANUAL_TRIGGER_NODE_TYPE, SET_NODE_TYPE } from '@/constants';
 import { type INodeUi } from '@/Interface';
 import { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useSettingsStore } from '@/stores/settings.store';
 import { useUIStore } from '@/stores/ui.store';
 import { useWorkflowsStore } from '@/stores/workflows.store';
 import { CanvasNodeDirtiness } from '@/types';
-import { type FrontendSettings } from '@n8n/api-types';
 import { createTestingPinia } from '@pinia/testing';
 import { NodeConnectionTypes, type IConnections, type IRunData } from 'n8n-workflow';
 import { defineComponent } from 'vue';
 import { createRouter, createWebHistory, type RouteLocationNormalizedLoaded } from 'vue-router';
+import { useWorkflowState } from './useWorkflowState';
 
 describe(useNodeDirtiness, () => {
 	let nodeTypeStore: ReturnType<typeof useNodeTypesStore>;
 	let workflowsStore: ReturnType<typeof useWorkflowsStore>;
-	let settingsStore: ReturnType<typeof useSettingsStore>;
 	let historyHelper: ReturnType<typeof useHistoryHelper>;
 	let canvasOperations: ReturnType<typeof useCanvasOperations>;
 	let uiStore: ReturnType<typeof useUIStore>;
@@ -35,17 +32,11 @@ describe(useNodeDirtiness, () => {
 			setup() {
 				nodeTypeStore = useNodeTypesStore();
 				workflowsStore = useWorkflowsStore();
-				settingsStore = useSettingsStore();
 				historyHelper = useHistoryHelper({} as RouteLocationNormalizedLoaded);
 				canvasOperations = useCanvasOperations();
 				uiStore = useUIStore();
 
 				nodeTypeStore.setNodeTypes(defaultNodeDescriptions);
-
-				// Enable new partial execution
-				settingsStore.settings = {
-					partialExecution: { version: 2 },
-				} as FrontendSettings;
 			},
 			template: '<div />',
 		});
@@ -136,7 +127,8 @@ describe(useNodeDirtiness, () => {
 
 			const runAt = new Date(+WORKFLOW_UPDATED_AT + 1000);
 
-			workflowsStore.setWorkflowExecutionData({
+			const workflowState = useWorkflowState();
+			workflowState.setWorkflowExecutionData({
 				id: workflowsStore.workflow.id,
 				finished: true,
 				mode: 'manual',
@@ -444,7 +436,8 @@ describe(useNodeDirtiness, () => {
 			});
 		}
 
-		workflowsStore.setWorkflowExecutionData({
+		const workflowState = useWorkflowState();
+		workflowState.setWorkflowExecutionData({
 			id: workflow.id,
 			finished: true,
 			mode: 'manual',

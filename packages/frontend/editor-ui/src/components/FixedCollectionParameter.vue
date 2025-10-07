@@ -1,21 +1,18 @@
 <script lang="ts" setup>
 import type { IUpdateInformation } from '@/Interface';
 
-import type { INodeParameters, INodeProperties, NodeParameterValueType } from 'n8n-workflow';
+import type {
+	INodeParameters,
+	INodeProperties,
+	INodePropertyCollection,
+	NodeParameterValueType,
+} from 'n8n-workflow';
 import { deepCopy, isINodePropertyCollectionList } from 'n8n-workflow';
 
 import get from 'lodash/get';
 
 import { computed, ref, watch, onBeforeMount } from 'vue';
 import { useI18n } from '@n8n/i18n';
-import {
-	N8nIconButton,
-	N8nSelect,
-	N8nOption,
-	N8nInputLabel,
-	N8nText,
-	N8nButton,
-} from '@n8n/design-system';
 import ParameterInputList from './ParameterInputList.vue';
 import Draggable from 'vuedraggable';
 import { useWorkflowsStore } from '@/stores/workflows.store';
@@ -23,6 +20,14 @@ import { useNDVStore } from '@/stores/ndv.store';
 import { telemetry } from '@/plugins/telemetry';
 import { storeToRefs } from 'pinia';
 
+import {
+	N8nButton,
+	N8nIconButton,
+	N8nInputLabel,
+	N8nOption,
+	N8nSelect,
+	N8nText,
+} from '@n8n/design-system';
 const locale = useI18n();
 
 export type Props = {
@@ -229,6 +234,10 @@ const trackWorkflowInputFieldAdded = () => {
 		node_id: ndvStore.activeNode?.id,
 	});
 };
+
+function getItemKey(item: INodeParameters, property: INodePropertyCollection) {
+	return mutableValues.value[property.name]?.indexOf(item) ?? -1;
+}
 </script>
 
 <template>
@@ -258,6 +267,7 @@ const trackWorkflowInputFieldAdded = () => {
 			<div v-if="multipleValues">
 				<Draggable
 					v-model="mutableValues[property.name]"
+					:item-key="(item: INodeParameters) => getItemKey(item, property)"
 					handle=".drag-handle"
 					drag-class="dragging"
 					ghost-class="ghost"
@@ -276,22 +286,22 @@ const trackWorkflowInputFieldAdded = () => {
 										v-if="sortable"
 										type="tertiary"
 										text
-										size="mini"
+										size="small"
 										icon="grip-vertical"
 										:title="locale.baseText('fixedCollectionParameter.dragItem')"
 										class="drag-handle"
-									></N8nIconButton>
+									/>
 								</div>
 								<div v-if="!isReadOnly" class="icon-button extra-top-padding">
 									<N8nIconButton
 										type="tertiary"
 										text
-										size="mini"
-										icon="trash"
+										size="small"
+										icon="trash-2"
 										data-test-id="fixed-collection-delete"
 										:title="locale.baseText('fixedCollectionParameter.deleteItem')"
 										@click="deleteOption(property.name, index)"
-									></N8nIconButton>
+									/>
 								</div>
 								<Suspense>
 									<ParameterInputList
@@ -314,8 +324,8 @@ const trackWorkflowInputFieldAdded = () => {
 						<N8nIconButton
 							type="tertiary"
 							text
-							size="mini"
-							icon="trash"
+							size="small"
+							icon="trash-2"
 							data-test-id="fixed-collection-delete"
 							:title="locale.baseText('fixedCollectionParameter.deleteItem')"
 							@click="deleteOption(property.name)"

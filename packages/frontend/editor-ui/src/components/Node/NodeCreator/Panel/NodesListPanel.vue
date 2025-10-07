@@ -28,6 +28,7 @@ import CommunityNodeDocsLink from './CommunityNodeDocsLink.vue';
 import CommunityNodeFooter from './CommunityNodeFooter.vue';
 import { useUsersStore } from '@/stores/users.store';
 
+import { N8nIcon, N8nNotice } from '@n8n/design-system';
 const i18n = useI18n();
 const { callDebounced } = useDebounce();
 
@@ -160,7 +161,7 @@ function onBackButton() {
 </script>
 
 <template>
-	<transition
+	<Transition
 		v-if="viewStacks.length > 0"
 		:name="`panel-slide-${activeViewStack.transitionDirection}`"
 		@after-leave="onTransitionEnd"
@@ -184,7 +185,7 @@ function onBackButton() {
 						:class="$style.backButton"
 						@click="onBackButton"
 					>
-						<font-awesome-icon :class="$style.backButtonIcon" icon="arrow-left" size="2x" />
+						<N8nIcon :class="$style.backButtonIcon" icon="arrow-left" :size="22" />
 					</button>
 					<NodeIcon
 						v-if="activeViewStack.nodeIcon"
@@ -193,6 +194,7 @@ function onBackButton() {
 						:circle="false"
 						:show-tooltip="false"
 						:size="20"
+						:use-updated-icons="true"
 					/>
 					<p v-if="activeViewStack.title" :class="$style.title" v-text="activeViewStack.title" />
 
@@ -222,7 +224,7 @@ function onBackButton() {
 			<CommunityNodeInfo v-if="communityNodeDetails && !isActionsMode" />
 
 			<div :class="$style.renderedItems">
-				<n8n-notice
+				<N8nNotice
 					v-if="activeViewStack.info && !activeViewStack.search"
 					:class="$style.info"
 					:content="activeViewStack.info"
@@ -241,7 +243,7 @@ function onBackButton() {
 				:show-manage="communityNodeDetails.installed && isInstanceOwner"
 			/>
 		</aside>
-	</transition>
+	</Transition>
 </template>
 
 <style lang="scss" module>
@@ -275,12 +277,11 @@ function onBackButton() {
 	background: transparent;
 	border: none;
 	cursor: pointer;
-	padding: 0 var(--spacing-xs) 0 0;
+	padding: var(--spacing-2xs) var(--spacing-xs) 0 0;
 }
 
 .backButtonIcon {
 	color: $node-creator-arrow-color;
-	height: 16px;
 	padding: 0;
 }
 .nodeIcon {

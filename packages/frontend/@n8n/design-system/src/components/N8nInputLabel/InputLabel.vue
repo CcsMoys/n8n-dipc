@@ -1,6 +1,5 @@
 <script lang="ts" setup>
-import type { TextColor } from '@n8n/design-system/types/text';
-
+import type { TextColor } from '../../types/text';
 import N8nIcon from '../N8nIcon';
 import N8nText from '../N8nText';
 import N8nTooltip from '../N8nTooltip';
@@ -74,7 +73,7 @@ const addTargetBlank = (html: string) =>
 						:class="[$style.infoIcon, showTooltip ? $style.visible : $style.hidden]"
 					>
 						<N8nTooltip placement="top" :popper-class="$style.tooltipPopper" :show-after="300">
-							<N8nIcon :class="$style.icon" icon="question-circle" size="small" />
+							<N8nIcon :class="$style.icon" icon="circle-help" size="small" />
 							<template #content>
 								<div v-n8n-html="addTargetBlank(tooltipText)" />
 							</template>

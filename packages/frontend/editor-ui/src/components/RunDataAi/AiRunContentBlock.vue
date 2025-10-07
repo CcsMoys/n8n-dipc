@@ -6,9 +6,8 @@ import { NodeConnectionTypes } from 'n8n-workflow';
 import type { NodeConnectionType, NodeError } from 'n8n-workflow';
 import RunDataAi from '@/components/RunDataParsedAiContent.vue';
 import { parseAiContent } from '@/utils/aiUtils';
-import { N8nRadioButtons } from '@n8n/design-system';
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
-
+import { N8nIcon, N8nRadioButtons } from '@n8n/design-system';
+import NodeErrorView from '@/components/Error/NodeErrorView.vue';
 const props = defineProps<{
 	runData: IAiDataContent;
 	error?: NodeError;
@@ -52,7 +51,7 @@ function onRenderTypeChange(value: 'rendered' | 'json') {
 	<div :class="$style.block">
 		<header :class="$style.blockHeader" @click="onBlockHeaderClick">
 			<button :class="$style.blockToggle">
-				<FontAwesomeIcon :icon="isExpanded ? 'angle-down' : 'angle-right'" size="lg" />
+				<N8nIcon :icon="isExpanded ? 'chevron-down' : 'chevron-right'" size="large" />
 			</button>
 			<p :class="$style.blockTitle">{{ capitalize(runData.inOut) }}</p>
 			<N8nRadioButtons

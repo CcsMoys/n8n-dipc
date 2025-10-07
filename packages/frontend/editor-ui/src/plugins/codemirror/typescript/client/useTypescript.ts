@@ -2,7 +2,7 @@ import { useDataSchema } from '@/composables/useDataSchema';
 import { useDebounce } from '@/composables/useDebounce';
 import { useNodeHelpers } from '@/composables/useNodeHelpers';
 import { autocompletableNodeNames } from '@/plugins/codemirror/completions/utils';
-import useEnvironmentsStore from '@/stores/environments.ee.store';
+import useEnvironmentsStore from '@/features/environments.ee/environments.store';
 import { useNDVStore } from '@/stores/ndv.store';
 import { useWorkflowsStore } from '@/stores/workflows.store';
 import { forceParse } from '@/utils/forceParse';
@@ -28,7 +28,7 @@ export function useTypescript(
 	view: MaybeRefOrGetter<EditorView | undefined>,
 	mode: MaybeRefOrGetter<CodeExecutionMode>,
 	id: MaybeRefOrGetter<string>,
-	targetNodeParameterContext?: MaybeRefOrGetter<TargetNodeParameterContext>,
+	targetNodeParameterContext?: MaybeRefOrGetter<TargetNodeParameterContext | undefined>,
 ) {
 	const { getInputDataWithPinned, getSchemaForExecutionData } = useDataSchema();
 	const ndvStore = useNDVStore();
@@ -47,12 +47,14 @@ export function useTypescript(
 			{
 				id: toValue(id),
 				content: Comlink.proxy((toValue(view)?.state.doc ?? Text.empty).toJSON()),
-				allNodeNames: autocompletableNodeNames(),
+				allNodeNames: autocompletableNodeNames(toValue(targetNodeParameterContext)),
 				variables: useEnvironmentsStore().variables.map((v) => v.key),
 				inputNodeNames: activeNodeName
-					? workflowsStore
-							.getCurrentWorkflow()
-							.getParentNodes(activeNodeName, NodeConnectionTypes.Main, 1)
+					? workflowsStore.workflowObject.getParentNodes(
+							activeNodeName,
+							NodeConnectionTypes.Main,
+							1,
+						)
 					: [],
 				mode: toValue(mode),
 			},

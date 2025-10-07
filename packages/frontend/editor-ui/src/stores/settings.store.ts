@@ -9,24 +9,16 @@ import type {
 import * as eventsApi from '@n8n/rest-api-client/api/events';
 import * as settingsApi from '@n8n/rest-api-client/api/settings';
 import * as moduleSettingsApi from '@n8n/rest-api-client/api/module-settings';
-import { testHealthEndpoint } from '@/api/templates';
-import {
-	INSECURE_CONNECTION_WARNING,
-	LOCAL_STORAGE_EXPERIMENTAL_DOCKED_NODE_SETTINGS,
-	LOCAL_STORAGE_EXPERIMENTAL_MIN_ZOOM_NODE_SETTINGS_IN_CANVAS,
-} from '@/constants';
+import { testHealthEndpoint } from '@n8n/rest-api-client/api/templates';
+import { INSECURE_CONNECTION_WARNING } from '@/constants';
 import { STORES } from '@n8n/stores';
 import { UserManagementAuthenticationMethod } from '@/Interface';
 import type { IDataObject, WorkflowSettings } from 'n8n-workflow';
 import { defineStore } from 'pinia';
 import { useRootStore } from '@n8n/stores/useRootStore';
 import { makeRestApiRequest } from '@n8n/rest-api-client';
-import { useToast } from '@/composables/useToast';
-import { useI18n } from '@n8n/i18n';
-import { useLocalStorage } from '@vueuse/core';
 
 export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
-	const i18n = useI18n();
 	const initialized = ref(false);
 	const settings = ref<FrontendSettings>({} as FrontendSettings);
 	const moduleSettings = ref<FrontendModuleSettings>({});
@@ -52,6 +44,7 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 	const saveDataSuccessExecution = ref<WorkflowSettings.SaveDataExecution>('all');
 	const saveManualExecutions = ref(false);
 	const saveDataProgressExecution = ref(false);
+	const isMFAEnforced = ref(false);
 
 	const isDocker = computed(() => settings.value?.isDocker ?? false);
 
@@ -70,11 +63,15 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		secureCookie: settings.value.authCookie.secure,
 	}));
 
-	const isEnterpriseFeatureEnabled = computed(() => settings.value.enterprise);
+	const isEnterpriseFeatureEnabled = computed(() => settings.value.enterprise ?? {});
 
 	const nodeJsVersion = computed(() => settings.value.nodeJsVersion);
 
+	const nodeEnv = computed(() => settings.value.nodeEnv);
+
 	const concurrency = computed(() => settings.value.concurrency);
+
+	const isNativePythonRunnerEnabled = computed(() => settings.value.isNativePythonRunnerEnabled);
 
 	const isConcurrencyEnabled = computed(() => concurrency.value !== -1);
 
@@ -88,9 +85,13 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 
 	const publicApiPath = computed(() => api.value.path);
 
-	const isAiAssistantEnabled = computed(() => settings.value.aiAssistant?.enabled);
+	const isAiAssistantEnabled = computed(
+		() => settings.value.aiAssistant?.enabled && settings.value.aiAssistant?.setup,
+	);
 
 	const isAskAiEnabled = computed(() => settings.value.askAi?.enabled);
+
+	const isAiBuilderEnabled = computed(() => settings.value.aiBuilder?.enabled);
 
 	const showSetupPage = computed(() => userManagement.value.showSetupOnFirstLoad);
 
@@ -98,22 +99,11 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 
 	const isCloudDeployment = computed(() => settings.value.deployment?.type === 'cloud');
 
-	const partialExecutionVersion = computed<1 | 2>(() => {
-		const defaultVersion = settings.value.partialExecution?.version ?? 1;
-		// -1 means we pick the defaultVersion
-		//  1 is the old flow
-		//  2 is the new flow
-		const userVersion = useLocalStorage('PartialExecution.version', -1).value;
-		const version = userVersion === -1 ? defaultVersion : userVersion;
+	const activeModules = computed(() => settings.value.activeModules);
 
-		// For backwards compatibility, e.g. if the user has 0 in their local
-		// storage, which used to be allowed, but not anymore.
-		if (![1, 2].includes(version)) {
-			return 1;
-		}
-
-		return version as 1 | 2;
-	});
+	const isModuleActive = (moduleName: string) => {
+		return activeModules.value?.includes(moduleName);
+	};
 
 	const isAiCreditsEnabled = computed(() => settings.value.aiCredits?.enabled);
 
@@ -133,9 +123,15 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		() => settings.value.telemetry && settings.value.telemetry.enabled,
 	);
 
+	const isMFAEnforcementLicensed = computed(() => {
+		return settings.value.enterprise?.mfaEnforcement ?? false;
+	});
+
 	const isMfaFeatureEnabled = computed(() => mfa.value.enabled);
 
 	const isFoldersFeatureEnabled = computed(() => folders.value.enabled);
+
+	const isDataTableFeatureEnabled = computed(() => isModuleActive('data-table'));
 
 	const areTagsEnabled = computed(() =>
 		settings.value.workflowTagsDisabled !== undefined ? !settings.value.workflowTagsDisabled : true,
@@ -176,10 +172,9 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 
 	const isDevRelease = computed(() => settings.value.releaseChannel === 'dev');
 
-	const activeModules = computed(() => settings.value.activeModules);
-
 	const setSettings = (newSettings: FrontendSettings) => {
 		settings.value = newSettings;
+
 		userManagement.value = newSettings.userManagement;
 		if (userManagement.value) {
 			userManagement.value.showSetupOnFirstLoad =
@@ -238,6 +233,8 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		setSaveDataProgressExecution(fetchedSettings.saveExecutionProgress);
 		setSaveManualExecutions(fetchedSettings.saveManualExecutions);
 
+		isMFAEnforced.value = settings.value.mfa?.enforced ?? false;
+
 		rootStore.setUrlBaseWebhook(fetchedSettings.urlBaseWebhook);
 		rootStore.setUrlBaseEditor(fetchedSettings.urlBaseEditor);
 		rootStore.setEndpointForm(fetchedSettings.endpointForm);
@@ -246,6 +243,8 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		rootStore.setEndpointWebhook(fetchedSettings.endpointWebhook);
 		rootStore.setEndpointWebhookTest(fetchedSettings.endpointWebhookTest);
 		rootStore.setEndpointWebhookWaiting(fetchedSettings.endpointWebhookWaiting);
+		rootStore.setEndpointMcp(fetchedSettings.endpointMcp);
+		rootStore.setEndpointMcpTest(fetchedSettings.endpointMcpTest);
 		rootStore.setTimezone(fetchedSettings.timezone);
 		rootStore.setExecutionTimeout(fetchedSettings.executionTimeout);
 		rootStore.setMaxExecutionTimeout(fetchedSettings.maxExecutionTimeout);
@@ -265,21 +264,9 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 			return;
 		}
 
-		const { showToast } = useToast();
-		try {
-			await getSettings();
+		await getSettings();
 
-			initialized.value = true;
-		} catch (e) {
-			showToast({
-				title: i18n.baseText('startupError'),
-				message: i18n.baseText('startupError.message'),
-				type: 'error',
-				duration: 0,
-			});
-
-			throw e;
-		}
+		initialized.value = true;
 	};
 
 	const stopShowingSetupPage = () => {
@@ -316,24 +303,6 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		moduleSettings.value = fetched;
 	};
 
-	/**
-	 * (Experimental) Minimum zoom level of the canvas to render node settings in place of nodes, without opening NDV
-	 */
-	const experimental__minZoomNodeSettingsInCanvas = useLocalStorage(
-		LOCAL_STORAGE_EXPERIMENTAL_MIN_ZOOM_NODE_SETTINGS_IN_CANVAS,
-		0,
-		{ writeDefaults: false },
-	);
-
-	/**
-	 * (Experimental) If set to true, show node settings for a selected node in docked pane
-	 */
-	const experimental__dockedNodeSettingsEnabled = useLocalStorage(
-		LOCAL_STORAGE_EXPERIMENTAL_DOCKED_NODE_SETTINGS,
-		false,
-		{ writeDefaults: false },
-	);
-
 	return {
 		settings,
 		userManagement,
@@ -350,7 +319,9 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		pruning,
 		security,
 		nodeJsVersion,
+		nodeEnv,
 		concurrency,
+		isNativePythonRunnerEnabled,
 		isConcurrencyEnabled,
 		isPublicApiEnabled,
 		isSwaggerUIEnabled,
@@ -388,11 +359,9 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		saveDataProgressExecution,
 		isCommunityPlan,
 		isAskAiEnabled,
+		isAiBuilderEnabled,
 		isAiCreditsEnabled,
 		aiCreditsQuota,
-		experimental__minZoomNodeSettingsInCanvas,
-		experimental__dockedNodeSettingsEnabled,
-		partialExecutionVersion,
 		reset,
 		getTimezones,
 		testTemplatesEndpoint,
@@ -401,8 +370,12 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		getSettings,
 		setSettings,
 		initialize,
-		activeModules,
 		getModuleSettings,
 		moduleSettings,
+		isMFAEnforcementLicensed,
+		isMFAEnforced,
+		activeModules,
+		isModuleActive,
+		isDataTableFeatureEnabled,
 	};
 });

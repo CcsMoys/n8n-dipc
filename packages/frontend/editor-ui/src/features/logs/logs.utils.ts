@@ -12,36 +12,42 @@ import {
 	type ISourceData,
 	parseErrorMetadata,
 	type RelatedExecution,
+	type INodeExecutionData,
 } from 'n8n-workflow';
-import type { LogEntry, LogEntrySelection, LogTreeCreationContext } from './logs.types';
-import { isProxy, isReactive, isRef, toRaw } from 'vue';
+import type {
+	LogEntry,
+	LogEntrySelection,
+	LogTreeCreationContext,
+	LogTreeFilter,
+} from './logs.types';
 import { CHAT_TRIGGER_NODE_TYPE, MANUAL_CHAT_TRIGGER_NODE_TYPE } from '@/constants';
 import { type ChatMessage } from '@n8n/chat/types';
-import get from 'lodash-es/get';
-import isEmpty from 'lodash-es/isEmpty';
+import get from 'lodash/get';
+import isEmpty from 'lodash/isEmpty';
 import { v4 as uuid } from 'uuid';
 import { TOOL_EXECUTOR_NODE_NAME } from '@n8n/constants';
 
-function getConsumedTokens(task: ITaskData): LlmTokenUsageData {
-	if (!task.data) {
-		return emptyTokenUsageData;
-	}
+export function getConsumedTokens(task: Array<INodeExecutionData | null>): LlmTokenUsageData {
+	const tokenUsage = task.reduce<LlmTokenUsageData>((acc, curr) => {
+		const tokenUsageData = curr?.json?.tokenUsage ?? curr?.json?.tokenUsageEstimate;
 
-	const tokenUsage = Object.values(task.data)
-		.flat()
-		.flat()
-		.reduce<LlmTokenUsageData>((acc, curr) => {
-			const tokenUsageData = curr?.json?.tokenUsage ?? curr?.json?.tokenUsageEstimate;
+		if (!tokenUsageData) return acc;
 
-			if (!tokenUsageData) return acc;
-
-			return addTokenUsageData(acc, {
-				...(tokenUsageData as Omit<LlmTokenUsageData, 'isEstimate'>),
-				isEstimate: !!curr?.json.tokenUsageEstimate,
-			});
-		}, emptyTokenUsageData);
+		return addTokenUsageData(acc, {
+			...(tokenUsageData as Omit<LlmTokenUsageData, 'isEstimate'>),
+			isEstimate: !!curr?.json.tokenUsageEstimate,
+		});
+	}, emptyTokenUsageData);
 
 	return tokenUsage;
+}
+
+function getConsumedTokensFromTaskData(runData: ITaskData) {
+	return getConsumedTokens(
+		Object.values(runData.data ?? {})
+			.flat()
+			.flat(),
+	);
 }
 
 function createNode(
@@ -54,15 +60,17 @@ function createNode(
 	return {
 		parent: context.parent,
 		node,
-		id: `${context.workflow.id}:${node.name}:${context.executionId}:${runIndex}`,
-		depth: context.depth,
+		// The ID consists of workflow ID, node ID and run index (including ancestor's), which
+		// makes it possible to identify the same log across different executions
+		id: `${context.workflow.id}:${node.id}:${[...context.ancestorRunIndexes, runIndex].join(':')}`,
 		runIndex,
 		runData,
 		children,
-		consumedTokens: runData ? getConsumedTokens(runData) : emptyTokenUsageData,
+		consumedTokens: runData ? getConsumedTokensFromTaskData(runData) : emptyTokenUsageData,
 		workflow: context.workflow,
 		executionId: context.executionId,
 		execution: context.data,
+		isSubExecution: context.isSubExecution,
 	};
 }
 
@@ -82,13 +90,14 @@ function getChildNodes(
 			return [];
 		}
 
-		return createLogTreeRec({
+		return createLogTreeRec(undefined, {
 			...context,
 			parent: treeNode,
-			depth: context.depth + 1,
+			ancestorRunIndexes: [...context.ancestorRunIndexes, runIndex ?? 0],
 			workflow,
 			executionId: subExecutionLocator.executionId,
 			data: subWorkflowRunData,
+			isSubExecution: true,
 		});
 	}
 
@@ -121,7 +130,7 @@ function getChildNodes(
 			return subNode
 				? getTreeNodeData(subNode, t, index, {
 						...context,
-						depth: context.depth + 1,
+						ancestorRunIndexes: [...context.ancestorRunIndexes, runIndex ?? 0],
 						parent: treeNode,
 					})
 				: [];
@@ -171,48 +180,31 @@ export function getSubtreeTotalConsumedTokens(
 	return calculate(treeNode);
 }
 
-function findLogEntryToAutoSelectRec(subTree: LogEntry[], depth: number): LogEntry | undefined {
-	for (const entry of subTree) {
-		if (entry.runData?.error) {
-			return entry;
-		}
+function findLogEntryToAutoSelect(subTree: LogEntry[]): LogEntry | undefined {
+	const entryWithError = findLogEntryRec((e) => !!e.runData?.error, subTree);
 
-		const childAutoSelect = findLogEntryToAutoSelectRec(entry.children, depth + 1);
-
-		if (childAutoSelect) {
-			return childAutoSelect;
-		}
-
-		if (entry.node.type === AGENT_LANGCHAIN_NODE_TYPE) {
-			if (isPlaceholderLog(entry) && entry.children.length > 0) {
-				return entry.children[0];
-			}
-
-			return entry;
-		}
+	if (entryWithError) {
+		return entryWithError;
 	}
 
-	return depth === 0 ? subTree[0] : undefined;
+	const entryForAiAgent = findLogEntryRec(
+		(entry) =>
+			entry.node.type === AGENT_LANGCHAIN_NODE_TYPE ||
+			(entry.parent?.node.type === AGENT_LANGCHAIN_NODE_TYPE && isPlaceholderLog(entry.parent)),
+		subTree,
+	);
+
+	if (entryForAiAgent) {
+		return entryForAiAgent;
+	}
+
+	return subTree[subTree.length - 1];
 }
 
-export function createLogTree(
-	workflow: Workflow,
-	response: IExecutionResponse,
-	workflows: Record<string, Workflow> = {},
-	subWorkflowData: Record<string, IRunExecutionData> = {},
-) {
-	return createLogTreeRec({
-		parent: undefined,
-		depth: 0,
-		executionId: response.id,
-		workflow,
-		workflows,
-		data: response.data ?? { resultData: { runData: {} } },
-		subWorkflowData,
-	});
-}
-
-function createLogTreeRec(context: LogTreeCreationContext) {
+function createLogTreeRec(
+	filter: LogTreeFilter | undefined,
+	context: LogTreeCreationContext,
+): LogEntry[] {
 	const runData = context.data.resultData.runData;
 
 	return Object.entries(runData)
@@ -224,7 +216,7 @@ function createLogTreeRec(context: LogTreeCreationContext) {
 		}>(([nodeName, taskData]) => {
 			const node = context.workflow.getNode(nodeName);
 
-			if (node === null) {
+			if (node === null || (filter && filter.rootNodeId !== node.id)) {
 				return [];
 			}
 
@@ -232,12 +224,16 @@ function createLogTreeRec(context: LogTreeCreationContext) {
 
 			if (childNodes.length === 0) {
 				// The node is root node
-				return taskData.map((task, runIndex) => ({
+				const taskDataList = taskData.map((task, runIndex) => ({
 					node,
 					task,
 					runIndex,
 					nodeHasMultipleRuns: taskData.length > 1,
 				}));
+
+				return filter
+					? taskDataList.filter((item) => item.runIndex === filter.rootNodeRunIndex)
+					: taskDataList;
 			}
 
 			// The node is sub node
@@ -259,6 +255,29 @@ function createLogTreeRec(context: LogTreeCreationContext) {
 			getTreeNodeData(node, task, nodeHasMultipleRuns ? runIndex : undefined, context),
 		)
 		.sort(sortLogEntries);
+}
+
+export function createLogTree(
+	workflow: Workflow,
+	response: IExecutionResponse,
+	workflows: Record<string, Workflow> = {},
+	subWorkflowData: Record<string, IRunExecutionData> = {},
+	filter?: LogTreeFilter,
+): LogEntry[] {
+	return createLogTreeRec(filter, {
+		parent: undefined,
+		ancestorRunIndexes: [],
+		executionId: response.id,
+		workflow,
+		workflows,
+		data: response.data ?? { resultData: { runData: {} } },
+		subWorkflowData,
+		isSubExecution: false,
+	});
+}
+
+export function findLogEntryById(id: string, entries: LogEntry[]) {
+	return findLogEntryRec((entry) => entry.id === id, entries);
 }
 
 export function findLogEntryRec(
@@ -283,61 +302,35 @@ export function findLogEntryRec(
 export function findSelectedLogEntry(
 	selection: LogEntrySelection,
 	entries: LogEntry[],
+	isExecuting: boolean,
 ): LogEntry | undefined {
 	switch (selection.type) {
 		case 'initial':
-			return findLogEntryToAutoSelectRec(entries, 0);
+			return isExecuting ? undefined : findLogEntryToAutoSelect(entries);
 		case 'none':
 			return undefined;
 		case 'selected': {
-			const entry = findLogEntryRec((e) => e.id === selection.id, entries);
+			const found = findLogEntryRec((e) => e.id === selection.entry.id, entries);
 
-			if (entry) {
-				return entry;
+			if (found === undefined && !isExecuting) {
+				for (let runIndex = selection.entry.runIndex - 1; runIndex >= 0; runIndex--) {
+					const fallback = findLogEntryRec(
+						(e) =>
+							e.workflow.id === selection.entry.workflow.id &&
+							e.node.id === selection.entry.node.id &&
+							e.runIndex === runIndex,
+						entries,
+					);
+
+					if (fallback !== undefined) {
+						return fallback;
+					}
+				}
 			}
 
-			return findLogEntryToAutoSelectRec(entries, 0);
+			return found;
 		}
 	}
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function deepToRaw<T>(sourceObj: T): T {
-	const seen = new WeakMap();
-
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const objectIterator = (input: any): any => {
-		if (seen.has(input)) {
-			return input;
-		}
-
-		if (input !== null && typeof input === 'object') {
-			seen.set(input, true);
-		}
-
-		if (Array.isArray(input)) {
-			return input.map((item) => objectIterator(item));
-		}
-
-		if (isRef(input) || isReactive(input) || isProxy(input)) {
-			return objectIterator(toRaw(input));
-		}
-
-		if (
-			input !== null &&
-			typeof input === 'object' &&
-			Object.getPrototypeOf(input) === Object.prototype
-		) {
-			return Object.keys(input).reduce((acc, key) => {
-				acc[key as keyof typeof acc] = objectIterator(input[key]);
-				return acc;
-			}, {} as T);
-		}
-
-		return input;
-	};
-
-	return objectIterator(sourceObj);
 }
 
 export function flattenLogEntries(
@@ -531,8 +524,24 @@ export function extractBotResponse(
 	if (get(nodeResponseData, 'error')) {
 		responseMessage = '[ERROR: ' + get(nodeResponseData, 'error.message') + ']';
 	} else {
-		const responseData = get(nodeResponseData, 'data.main[0][0].json');
-		const text = extractResponseText(responseData) ?? emptyText;
+		// Check all output branches for response data, not just the first one
+		const mainOutputs = get(nodeResponseData, 'data.main');
+		let text: string | undefined;
+
+		if (mainOutputs && Array.isArray(mainOutputs)) {
+			for (const branch of mainOutputs) {
+				if (branch?.[0]?.json) {
+					const responseData = branch[0].json;
+					text = extractResponseText(responseData);
+					if (text) {
+						break; // Found a valid response, stop searching
+					}
+				}
+			}
+		}
+
+		// Fall back to emptyText if no valid response found
+		text = text ?? emptyText;
 
 		if (!text) {
 			return undefined;
@@ -555,7 +564,7 @@ function extractResponseText(responseData?: IDataObject): string | undefined {
 	}
 
 	// Paths where the response message might be located
-	const paths = ['output', 'text', 'response.text'];
+	const paths = ['output', 'text', 'response.text', 'message'];
 	const matchedPath = paths.find((path) => get(responseData, path));
 
 	if (!matchedPath) return JSON.stringify(responseData, null, 2);
@@ -589,10 +598,57 @@ export function restoreChatHistory(
 	return [...(userMessage ? [userMessage] : []), ...(botMessage ? [botMessage] : [])];
 }
 
+export async function processFiles(data: File[] | undefined) {
+	if (!data || data.length === 0) return [];
+
+	const filePromises = data.map(async (file) => {
+		// We do not need to await here as it will be awaited on the return by Promise.all
+		// eslint-disable-next-line @typescript-eslint/return-await
+		return new Promise<{ name: string; type: string; data: string }>((resolve, reject) => {
+			const reader = new FileReader();
+
+			reader.onload = () =>
+				resolve({
+					name: file.name,
+					type: file.type,
+					data: reader.result as string,
+				});
+
+			reader.onerror = () =>
+				reject(new Error(`Error reading file: ${reader.error?.message ?? 'Unknown error'}`));
+
+			reader.readAsDataURL(file);
+		});
+	});
+
+	return await Promise.all(filePromises);
+}
+
 export function isSubNodeLog(logEntry: LogEntry): boolean {
 	return logEntry.parent !== undefined && logEntry.parent.executionId === logEntry.executionId;
 }
 
 export function isPlaceholderLog(treeNode: LogEntry): boolean {
 	return treeNode.runData === undefined;
+}
+
+/**
+ * Creates a copy of execution data just deep enough to keeps logs immutable and not reactive.
+ * We deliberately avoid full deep copy here for performance reason.
+ *
+ * TODO: use shallowRef() for execution data in workflows store to make this unnecessary.
+ */
+export function copyExecutionData(executionData: IExecutionResponse): IExecutionResponse {
+	return {
+		...executionData,
+		data: {
+			...executionData.data,
+			resultData: {
+				...executionData.data?.resultData,
+				runData: Object.fromEntries(
+					Object.entries(executionData.data?.resultData.runData ?? {}).map(([k, v]) => [k, [...v]]),
+				),
+			},
+		},
+	};
 }

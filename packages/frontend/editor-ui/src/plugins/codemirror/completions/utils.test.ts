@@ -1,5 +1,4 @@
 import { createTestNode, createTestWorkflowObject } from '@/__tests__/mocks';
-import * as workflowHelpers from '@/composables/useWorkflowHelpers';
 import * as ndvStore from '@/stores/ndv.store';
 import { CompletionContext, insertCompletionText } from '@codemirror/autocomplete';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
@@ -7,7 +6,16 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NodeConnectionTypes, type IConnections } from 'n8n-workflow';
 import type { MockInstance } from 'vitest';
-import { autocompletableNodeNames, expressionWithFirstItem, stripExcessParens } from './utils';
+import {
+	autocompletableNodeNames,
+	expressionWithFirstItem,
+	stripExcessParens,
+	isAllowedInDotNotation,
+} from './utils';
+import { useWorkflowsStore } from '@/stores/workflows.store';
+import { mockedStore } from '@/__tests__/utils';
+import { createTestingPinia } from '@pinia/testing';
+import { setActivePinia } from 'pinia';
 
 vi.mock('@/composables/useWorkflowHelpers', () => ({
 	useWorkflowHelpers: vi.fn().mockReturnValue({
@@ -75,6 +83,11 @@ describe('completion utils', () => {
 	});
 
 	describe('autocompletableNodeNames', () => {
+		beforeEach(() => {
+			const pinia = createTestingPinia();
+			setActivePinia(pinia);
+		});
+
 		it('should work for normal nodes', () => {
 			const nodes = [
 				createTestNode({ name: 'Node 1' }),
@@ -98,10 +111,8 @@ describe('completion utils', () => {
 				connections,
 			});
 
-			const workflowHelpersMock: MockInstance = vi.spyOn(workflowHelpers, 'useWorkflowHelpers');
-			workflowHelpersMock.mockReturnValue({
-				getCurrentWorkflow: vi.fn(() => workflowObject),
-			});
+			const workflowsStore = mockedStore(useWorkflowsStore);
+			workflowsStore.workflowObject = workflowObject;
 			const ndvStoreMock: MockInstance = vi.spyOn(ndvStore, 'useNDVStore');
 			ndvStoreMock.mockReturnValue({ activeNode: nodes[2] });
 
@@ -131,10 +142,9 @@ describe('completion utils', () => {
 				connections,
 			});
 
-			const workflowHelpersMock: MockInstance = vi.spyOn(workflowHelpers, 'useWorkflowHelpers');
-			workflowHelpersMock.mockReturnValue({
-				getCurrentWorkflow: vi.fn(() => workflowObject),
-			});
+			const workflowsStore = mockedStore(useWorkflowsStore);
+			workflowsStore.workflowObject = workflowObject;
+
 			const ndvStoreMock: MockInstance = vi.spyOn(ndvStore, 'useNDVStore');
 			ndvStoreMock.mockReturnValue({ activeNode: nodes[2] });
 
@@ -176,6 +186,37 @@ describe('completion utils', () => {
 			}
 
 			expect(view.state.doc.toString()).toEqual(expected);
+		});
+	});
+
+	describe('isAllowedInDotNotation', () => {
+		it('should return false for keys with forward slashes', () => {
+			expect(
+				isAllowedInDotNotation(
+					'applications/n8n/available-to-users/google-cloud-geocoding-api-key',
+				),
+			).toBe(false);
+			expect(isAllowedInDotNotation('path/to/secret')).toBe(false);
+			expect(isAllowedInDotNotation('secret/with/slashes')).toBe(false);
+		});
+
+		it('should return false for keys with other special characters', () => {
+			expect(isAllowedInDotNotation('key with spaces')).toBe(false);
+			expect(isAllowedInDotNotation('key-with-hyphens')).toBe(false);
+			expect(isAllowedInDotNotation('key.with.dots')).toBe(false);
+			expect(isAllowedInDotNotation('key[with]brackets')).toBe(false);
+		});
+
+		it('should return true for valid JavaScript identifiers', () => {
+			expect(isAllowedInDotNotation('validKey')).toBe(true);
+			expect(isAllowedInDotNotation('valid_key')).toBe(true);
+			expect(isAllowedInDotNotation('validKey123')).toBe(true);
+			expect(isAllowedInDotNotation('_validKey')).toBe(true);
+		});
+
+		it('should return false for keys starting with numbers', () => {
+			expect(isAllowedInDotNotation('123key')).toBe(false);
+			expect(isAllowedInDotNotation('0invalid')).toBe(false);
 		});
 	});
 });

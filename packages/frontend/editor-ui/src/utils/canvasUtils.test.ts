@@ -7,6 +7,7 @@ import {
 	mapLegacyConnectionsToCanvasConnections,
 	mapLegacyEndpointsToCanvasConnectionPort,
 	parseCanvasConnectionHandleString,
+	shouldIgnoreCanvasShortcut,
 } from '@/utils/canvasUtils';
 import type { IConnection, IConnections, INodeTypeDescription } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
@@ -992,7 +993,7 @@ describe('insertSpacersBetweenEndpoints', () => {
 		const endpoints = [{ index: 0, required: true }];
 		const requiredEndpointsCount = endpoints.filter((endpoint) => endpoint.required).length;
 		const result = insertSpacersBetweenEndpoints(endpoints, requiredEndpointsCount);
-		expect(result).toEqual([{ index: 0, required: true }, null, null, null, null]);
+		expect(result).toEqual([{ index: 0, required: true }, null, null, null]);
 	});
 
 	it('should not insert spacers when there are at least min endpoints count', () => {
@@ -1012,14 +1013,14 @@ describe('insertSpacersBetweenEndpoints', () => {
 		const endpoints = [{ index: 0, required: false }];
 		const requiredEndpointsCount = endpoints.filter((endpoint) => endpoint.required).length;
 		const result = insertSpacersBetweenEndpoints(endpoints, requiredEndpointsCount);
-		expect(result).toEqual([null, null, null, null, { index: 0, required: false }]);
+		expect(result).toEqual([null, null, null, { index: 0, required: false }]);
 	});
 
 	it('should handle no endpoints', () => {
 		const endpoints: Array<{ index: number; required: boolean }> = [];
 		const requiredEndpointsCount = endpoints.filter((endpoint) => endpoint.required).length;
 		const result = insertSpacersBetweenEndpoints(endpoints, requiredEndpointsCount);
-		expect(result).toEqual([null, null, null, null, null]);
+		expect(result).toEqual([null, null, null, null]);
 	});
 
 	it('should handle required endpoints greater than NODE_MIN_INPUT_ITEMS_COUNT', () => {
@@ -1040,7 +1041,6 @@ describe('insertSpacersBetweenEndpoints', () => {
 			{ index: 0, required: true },
 			{ index: 1, required: true },
 			null,
-			null,
 			{ index: 2 },
 		]);
 	});
@@ -1049,6 +1049,47 @@ describe('insertSpacersBetweenEndpoints', () => {
 		const endpoints = [{ index: 0, required: true }];
 		const requiredEndpointsCount = endpoints.filter((endpoint) => endpoint.required).length;
 		const result = insertSpacersBetweenEndpoints(endpoints, requiredEndpointsCount);
-		expect(result).toEqual([{ index: 0, required: true }, null, null, null, null]);
+		expect(result).toEqual([{ index: 0, required: true }, null, null, null]);
+	});
+});
+
+describe(shouldIgnoreCanvasShortcut, () => {
+	it('should return false if given element is a div element', () => {
+		expect(shouldIgnoreCanvasShortcut(document.createElement('div'))).toEqual(false);
+	});
+
+	it('should return true if given element is an input element', () => {
+		expect(shouldIgnoreCanvasShortcut(document.createElement('input'))).toEqual(true);
+	});
+
+	it('should return true if given element is a textarea element', () => {
+		expect(shouldIgnoreCanvasShortcut(document.createElement('textarea'))).toEqual(true);
+	});
+
+	it('should return true if given element is an element with contenteditable attribute', () => {
+		const div = document.createElement('div');
+
+		div.setAttribute('contenteditable', 'true');
+
+		expect(shouldIgnoreCanvasShortcut(div)).toEqual(true);
+	});
+
+	it('should return true if given element is a child of an element with contenteditable attribute', () => {
+		const parent = document.createElement('div');
+		const child = document.createElement('div');
+
+		parent.appendChild(child);
+
+		parent.setAttribute('contenteditable', 'true');
+
+		expect(shouldIgnoreCanvasShortcut(child)).toEqual(true);
+	});
+
+	it('should return true if given element is has class "ignore-key-press-canvas"', () => {
+		const div = document.createElement('div');
+
+		div.classList.add('ignore-key-press-canvas');
+
+		expect(shouldIgnoreCanvasShortcut(div)).toEqual(true);
 	});
 });

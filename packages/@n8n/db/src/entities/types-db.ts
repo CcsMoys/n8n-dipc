@@ -1,5 +1,6 @@
-import type { GlobalRole, Scope } from '@n8n/permissions';
+import type { Scope } from '@n8n/permissions';
 import type { FindOperator } from '@n8n/typeorm';
+import type express from 'express';
 import type {
 	ICredentialsEncrypted,
 	IRunExecutionData,
@@ -12,6 +13,7 @@ import type {
 	ExecutionSummary,
 	IUser,
 } from 'n8n-workflow';
+import { z } from 'zod';
 
 import type { CredentialsEntity } from './credentials-entity';
 import type { Folder } from './folder';
@@ -104,7 +106,7 @@ export interface PublicUser {
 	passwordResetToken?: string;
 	createdAt: Date;
 	isPending: boolean;
-	role?: GlobalRole;
+	role?: string;
 	globalScopes?: Scope[];
 	signInType: AuthProviderType;
 	disabled: boolean;
@@ -112,6 +114,8 @@ export interface PublicUser {
 	inviteAcceptUrl?: string;
 	isOwner?: boolean;
 	featureFlags?: FeatureFlags; // External type from n8n-workflow
+	lastActiveAt?: Date | null;
+	mfaAuthenticated?: boolean;
 }
 
 export type UserSettings = Pick<User, 'id' | 'settings'>;
@@ -269,7 +273,13 @@ export const enum StatisticsNames {
 	dataLoaded = 'data_loaded',
 }
 
-export type AuthProviderType = 'ldap' | 'email' | 'saml' | 'oidc'; // | 'google';
+const ALL_AUTH_PROVIDERS = z.enum(['ldap', 'email', 'saml', 'oidc']);
+
+export type AuthProviderType = z.infer<typeof ALL_AUTH_PROVIDERS>;
+
+export function isAuthProviderType(value: string): value is AuthProviderType {
+	return ALL_AUTH_PROVIDERS.safeParse(value).success;
+}
 
 export type FolderWithWorkflowAndSubFolderCount = Folder & {
 	workflowCount?: boolean;
@@ -289,7 +299,6 @@ export type TestRunErrorCode =
 	| 'EVALUATION_TRIGGER_NOT_FOUND'
 	| 'EVALUATION_TRIGGER_NOT_CONFIGURED'
 	| 'EVALUATION_TRIGGER_DISABLED'
-	| 'SET_OUTPUTS_NODE_NOT_FOUND'
 	| 'SET_OUTPUTS_NODE_NOT_CONFIGURED'
 	| 'SET_METRICS_NODE_NOT_FOUND'
 	| 'SET_METRICS_NODE_NOT_CONFIGURED'
@@ -325,12 +334,6 @@ export namespace ListQuery {
 	};
 }
 
-export type ProjectRole =
-	| 'project:personalOwner'
-	| 'project:admin'
-	| 'project:editor'
-	| 'project:viewer';
-
 export interface IGetExecutionsQueryFilter {
 	id?: FindOperator<string> | string;
 	finished?: boolean;
@@ -354,4 +357,31 @@ export type WorkflowFolderUnionFull = (
 	| FolderWithWorkflowAndSubFolderCount
 ) & {
 	resource: ResourceType;
+};
+
+export type APIRequest<
+	RouteParams = {},
+	ResponseBody = {},
+	RequestBody = {},
+	RequestQuery = {},
+> = express.Request<RouteParams, ResponseBody, RequestBody, RequestQuery> & {
+	browserId?: string;
+};
+
+export type AuthenticationInformation = {
+	usedMfa: boolean;
+};
+
+export type AuthenticatedRequest<
+	RouteParams = {},
+	ResponseBody = {},
+	RequestBody = {},
+	RequestQuery = {},
+> = Omit<APIRequest<RouteParams, ResponseBody, RequestBody, RequestQuery>, 'user' | 'cookies'> & {
+	user: User;
+	authInfo?: AuthenticationInformation;
+	cookies: Record<string, string | undefined>;
+	headers: express.Request['headers'] & {
+		'push-ref': string;
+	};
 };

@@ -2,6 +2,7 @@
 import { useI18n } from '@n8n/i18n';
 import { computed } from 'vue';
 
+import { N8nIconButton } from '@n8n/design-system';
 const props = defineProps<{
 	stopping?: boolean;
 }>();
@@ -17,7 +18,7 @@ const title = computed(() =>
 
 <template>
 	<N8nIconButton
-		icon="stop"
+		icon="square"
 		size="large"
 		class="stop-execution"
 		type="secondary"

@@ -1,7 +1,10 @@
 <script lang="ts" setup>
 import { useI18n } from '@n8n/i18n';
 import { usePageRedirectionHelper } from '@/composables/usePageRedirectionHelper';
+import { I18nT } from 'vue-i18n';
 
+import { ElDialog } from 'element-plus';
+import { N8nButton } from '@n8n/design-system';
 type Props = {
 	limit: number;
 	planName?: string;
@@ -18,13 +21,13 @@ const goToUpgrade = async () => {
 };
 </script>
 <template>
-	<el-dialog
+	<ElDialog
 		v-model="visible"
 		:title="locale.baseText('projects.settings.role.upgrade.title')"
 		width="500"
 	>
 		<div class="pt-l">
-			<i18n-t keypath="projects.settings.role.upgrade.message">
+			<I18nT keypath="projects.settings.role.upgrade.message" scope="global">
 				<template #planName>{{ props.planName }}</template>
 				<template #limit>
 					{{
@@ -34,7 +37,7 @@ const goToUpgrade = async () => {
 						})
 					}}
 				</template>
-			</i18n-t>
+			</I18nT>
 		</div>
 		<template #footer>
 			<N8nButton type="secondary" native-type="button" @click="visible = false">{{
@@ -44,5 +47,5 @@ const goToUpgrade = async () => {
 				locale.baseText('projects.create.limitReached.link')
 			}}</N8nButton>
 		</template>
-	</el-dialog>
+	</ElDialog>
 </template>

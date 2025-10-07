@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 import type { ExecutionStatus, INodeConnections, NodeConnectionType } from 'n8n-workflow';
 import type {
 	DefaultEdge,
@@ -45,7 +44,7 @@ export const enum CanvasNodeRenderType {
 	Default = 'default',
 	StickyNote = 'n8n-nodes-base.stickyNote',
 	AddNodes = 'n8n-nodes-internal.addNodes',
-	AIPrompt = 'n8n-nodes-base.aiPrompt',
+	ChoicePrompt = 'n8n-nodes-internal.choicePrompt',
 }
 
 export type CanvasNodeDefaultRenderLabelSize = 'small' | 'medium' | 'large';
@@ -83,8 +82,8 @@ export type CanvasNodeAddNodesRender = {
 	options: Record<string, never>;
 };
 
-export type CanvasNodeAIPromptRender = {
-	type: CanvasNodeRenderType.AIPrompt;
+export type CanvasNodeChoicePromptRender = {
+	type: CanvasNodeRenderType.ChoicePrompt;
 	options: Record<string, never>;
 };
 
@@ -112,7 +111,8 @@ export interface CanvasNodeData {
 		[CanvasConnectionMode.Output]: INodeConnections;
 	};
 	issues: {
-		items: string[];
+		execution: string[];
+		validation: string[];
 		visible: boolean;
 	};
 	pinnedData: {
@@ -126,7 +126,7 @@ export interface CanvasNodeData {
 		waitingForNext?: boolean;
 	};
 	runData: {
-		outputMap: ExecutionOutputMap;
+		outputMap?: ExecutionOutputMap;
 		iterations: number;
 		visible: boolean;
 	};
@@ -134,7 +134,7 @@ export interface CanvasNodeData {
 		| CanvasNodeDefaultRender
 		| CanvasNodeStickyNoteRender
 		| CanvasNodeAddNodesRender
-		| CanvasNodeAIPromptRender;
+		| CanvasNodeChoicePromptRender;
 }
 
 export type CanvasNode = Node<CanvasNodeData>;
@@ -164,6 +164,8 @@ export interface CanvasInjectionData {
 	isExecuting: Ref<boolean | undefined>;
 	connectingHandle: Ref<ConnectStartEvent | undefined>;
 	viewport: Ref<ViewportTransform>;
+	isExperimentalNdvActive: ComputedRef<boolean>;
+	isPaneMoving: Ref<boolean>;
 }
 
 export type CanvasNodeEventBusEvents = {
@@ -177,12 +179,14 @@ export type CanvasEventBusEvents = {
 	'saved:workflow': never;
 	'open:execution': IExecutionResponse;
 	'nodes:select': { ids: string[]; panIntoView?: boolean };
+	'nodes:selectAll': never;
 	'nodes:action': {
 		ids: string[];
 		action: keyof CanvasNodeEventBusEvents;
 		payload?: CanvasNodeEventBusEvents[keyof CanvasNodeEventBusEvents];
 	};
-	tidyUp: { source: CanvasLayoutSource };
+	tidyUp: { source: CanvasLayoutSource; nodeIdsFilter?: string[]; trackEvents?: boolean };
+	'create:sticky': never;
 };
 
 export interface CanvasNodeInjectionData {
@@ -237,3 +241,5 @@ export type ViewportBoundaries = {
 	yMin: number;
 	yMax: number;
 };
+
+export type SearchShortcut = '/' | 'ctrl+f';

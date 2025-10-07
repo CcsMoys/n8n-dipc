@@ -1,16 +1,18 @@
 <script lang="ts" setup>
-import type { AllRolesMap } from '@n8n/permissions';
-import { computed, ref, watch } from 'vue';
-import { useI18n } from '@n8n/i18n';
+import ProjectSharingInfo from '@/components/Projects/ProjectSharingInfo.vue';
 import {
 	ProjectTypes,
-	type ProjectIcon as ProjectIconItem,
 	type ProjectListItem,
 	type ProjectSharingData,
 } from '@/types/projects.types';
-import ProjectSharingInfo from '@/components/Projects/ProjectSharingInfo.vue';
+import { isIconOrEmoji, type IconOrEmoji } from '@n8n/design-system/components/N8nIconPicker/types';
+import type { SelectSize } from '@n8n/design-system/types';
+import { useI18n } from '@n8n/i18n';
+import type { AllRolesMap } from '@n8n/permissions';
 import { sortByProperty } from '@n8n/utils/sort/sortByProperty';
+import { computed, ref, watch } from 'vue';
 
+import { N8nBadge, N8nButton, N8nIcon, N8nOption, N8nSelect, N8nText } from '@n8n/design-system';
 const locale = useI18n();
 
 type Props = {
@@ -21,6 +23,8 @@ type Props = {
 	static?: boolean;
 	placeholder?: string;
 	emptyOptionsText?: string;
+	size?: SelectSize;
+	clearable?: boolean;
 };
 
 const props = defineProps<Props>();
@@ -30,6 +34,7 @@ const model = defineModel<(ProjectSharingData | null) | ProjectSharingData[]>({
 const emit = defineEmits<{
 	projectAdded: [value: ProjectSharingData];
 	projectRemoved: [value: ProjectSharingData];
+	clear: [];
 }>();
 
 const selectedProject = ref(Array.isArray(model.value) ? '' : (model.value?.id ?? ''));
@@ -51,14 +56,14 @@ const filteredProjects = computed(() =>
 	),
 );
 
-const projectIcon = computed<ProjectIconItem>(() => {
-	const defaultIcon: ProjectIconItem = { type: 'icon', value: 'layer-group' };
+const projectIcon = computed<IconOrEmoji>(() => {
+	const defaultIcon: IconOrEmoji = { type: 'icon', value: 'layers' };
 	const project = props.projects.find((p) => p.id === selectedProject.value);
 
 	if (project?.type === ProjectTypes.Personal) {
 		return { type: 'icon', value: 'user' };
 	} else if (project?.type === ProjectTypes.Team) {
-		return project.icon ?? defaultIcon;
+		return isIconOrEmoji(project.icon) ? project.icon : defaultIcon;
 	}
 
 	return defaultIcon;
@@ -122,9 +127,11 @@ watch(
 			:placeholder="selectPlaceholder"
 			:default-first-option="true"
 			:no-data-text="noDataText"
-			size="large"
+			:size="size ?? 'medium'"
 			:disabled="props.readonly"
+			:clearable
 			@update:model-value="onProjectSelected"
+			@clear="emit('clear')"
 		>
 			<template #prefix>
 				<N8nIcon v-if="projectIcon.type === 'icon'" :icon="projectIcon.value" color="text-dark" />
@@ -136,7 +143,7 @@ watch(
 				v-for="project in filteredProjects"
 				:key="project.id"
 				:value="project.id"
-				:label="project.name"
+				:label="project.name ?? ''"
 			>
 				<ProjectSharingInfo :project="project" />
 			</N8nOption>
@@ -164,14 +171,19 @@ watch(
 					size="small"
 					@update:model-value="onRoleAction(project, $event)"
 				>
-					<N8nOption v-for="role in roles" :key="role.role" :value="role.role" :label="role.name" />
+					<N8nOption
+						v-for="role in roles"
+						:key="role.slug"
+						:value="role.slug"
+						:label="role.displayName"
+					/>
 				</N8nSelect>
 				<N8nButton
 					v-if="!props.static"
 					type="tertiary"
 					native-type="button"
 					square
-					icon="trash"
+					icon="trash-2"
 					:disabled="props.readonly"
 					data-test-id="project-sharing-remove"
 					@click="onRoleAction(project, 'remove')"

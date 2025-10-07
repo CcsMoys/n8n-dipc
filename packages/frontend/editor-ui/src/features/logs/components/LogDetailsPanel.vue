@@ -12,33 +12,50 @@ import NodeIcon from '@/components/NodeIcon.vue';
 import { useI18n } from '@n8n/i18n';
 import { useNodeTypesStore } from '@/stores/nodeTypes.store';
 import LogsViewNodeName from '@/features/logs/components/LogsViewNodeName.vue';
-import { N8nButton, N8nResizeWrapper, N8nText } from '@n8n/design-system';
 import { computed, useTemplateRef } from 'vue';
 import KeyboardShortcutTooltip from '@/components/KeyboardShortcutTooltip.vue';
-import { getSubtreeTotalConsumedTokens } from '@/features/logs/logs.utils';
+import { getSubtreeTotalConsumedTokens, isPlaceholderLog } from '@/features/logs/logs.utils';
 import { LOG_DETAILS_PANEL_STATE } from '@/features/logs/logs.constants';
-import { isPlaceholderLog } from '@/features/logs/logs.utils';
+import { useNDVStore } from '@/stores/ndv.store';
+import { useExperimentalNdvStore } from '@/components/canvas/experimental/experimentalNdv.store';
 
+import { N8nButton, N8nResizeWrapper, N8nText } from '@n8n/design-system';
 const MIN_IO_PANEL_WIDTH = 200;
 
-const { isOpen, logEntry, window, latestInfo, panels } = defineProps<{
+const {
+	isOpen,
+	logEntry,
+	window,
+	latestInfo,
+	panels,
+	collapsingInputTableColumnName,
+	collapsingOutputTableColumnName,
+	isHeaderClickable,
+} = defineProps<{
 	isOpen: boolean;
 	logEntry: LogEntry;
 	window?: Window;
 	latestInfo?: LatestNodeInfo;
 	panels: LogDetailsPanelState;
+	collapsingInputTableColumnName: string | null;
+	collapsingOutputTableColumnName: string | null;
+	isHeaderClickable: boolean;
 }>();
 
 const emit = defineEmits<{
 	clickHeader: [];
 	toggleInputOpen: [] | [boolean];
 	toggleOutputOpen: [] | [boolean];
+	collapsingInputTableColumnChanged: [columnName: string | null];
+	collapsingOutputTableColumnChanged: [columnName: string | null];
 }>();
 
 defineSlots<{ actions: {} }>();
 
 const locale = useI18n();
 const nodeTypeStore = useNodeTypesStore();
+const ndvStore = useNDVStore();
+const experimentalNdvStore = useExperimentalNdvStore();
 
 const type = computed(() => nodeTypeStore.getNodeType(logEntry.node.type));
 const consumedTokens = computed(() => getSubtreeTotalConsumedTokens(logEntry, false));
@@ -53,6 +70,13 @@ const resizer = useResizablePanel('N8N_LOGS_INPUT_PANEL_WIDTH', {
 	allowFullSize: true,
 });
 const shouldResize = computed(() => panels === LOG_DETAILS_PANEL_STATE.BOTH);
+const searchShortcutPriorityPanel = computed(() =>
+	ndvStore.isNDVOpen || experimentalNdvStore.isMapperOpen
+		? undefined
+		: panels === LOG_DETAILS_PANEL_STATE.INPUT
+			? 'input'
+			: 'output',
+);
 
 function handleResizeEnd() {
 	if (resizer.isCollapsed.value) {
@@ -72,14 +96,14 @@ function handleResizeEnd() {
 		<LogsPanelHeader
 			data-test-id="log-details-header"
 			:class="$style.header"
+			:is-clickable="isHeaderClickable"
 			@click="emit('clickHeader')"
 		>
 			<template #title>
 				<div :class="$style.title">
 					<NodeIcon :node-type="type" :size="16" :class="$style.icon" />
 					<LogsViewNodeName
-						:latest-name="latestInfo?.name ?? logEntry.node.name"
-						:name="logEntry.node.name"
+						:name="latestInfo?.name ?? logEntry.node.name"
 						:is-deleted="latestInfo?.deleted ?? false"
 					/>
 					<LogsViewExecutionSummary
@@ -151,6 +175,9 @@ function handleResizeEnd() {
 						pane-type="input"
 						:title="locale.baseText('logs.details.header.actions.input')"
 						:log-entry="logEntry"
+						:collapsing-table-column-name="collapsingInputTableColumnName"
+						:search-shortcut="searchShortcutPriorityPanel === 'input' ? 'ctrl+f' : undefined"
+						@collapsing-table-column-changed="emit('collapsingInputTableColumnChanged', $event)"
 					/>
 				</N8nResizeWrapper>
 				<LogsViewRunData
@@ -160,6 +187,9 @@ function handleResizeEnd() {
 					:class="$style.outputPanel"
 					:title="locale.baseText('logs.details.header.actions.output')"
 					:log-entry="logEntry"
+					:collapsing-table-column-name="collapsingOutputTableColumnName"
+					:search-shortcut="searchShortcutPriorityPanel === 'output' ? 'ctrl+f' : undefined"
+					@collapsing-table-column-changed="emit('collapsingOutputTableColumnChanged', $event)"
 				/>
 			</template>
 		</div>

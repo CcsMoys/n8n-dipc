@@ -3,9 +3,10 @@ import { computed } from 'vue';
 import NodeIcon from '@/components/NodeIcon.vue';
 import { type INodeTypeDescription } from 'n8n-workflow';
 import { useI18n } from '@n8n/i18n';
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
 import { SCHEMA_PREVIEW_DOCS_URL } from '@/constants';
 
+import { N8nIcon, N8nLink } from '@n8n/design-system';
+import { I18nT } from 'vue-i18n';
 const props = defineProps<{
 	title: string;
 	collapsable: boolean;
@@ -27,7 +28,7 @@ const emit = defineEmits<{
 	<div class="schema-header-wrapper">
 		<div class="schema-header" data-test-id="run-data-schema-header">
 			<div class="toggle" @click.capture.stop="emit('click:toggle')">
-				<FontAwesomeIcon icon="angle-down" :class="{ 'collapse-icon': true, collapsed }" />
+				<N8nIcon size="medium" icon="chevron-down" :class="{ 'collapse-icon': true, collapsed }" />
 			</div>
 
 			<NodeIcon
@@ -41,7 +42,7 @@ const emit = defineEmits<{
 				{{ title }}
 				<span v-if="info" class="info">{{ info }}</span>
 			</div>
-			<FontAwesomeIcon v-if="isTrigger" class="trigger-icon" icon="bolt" size="xs" />
+			<N8nIcon v-if="isTrigger" class="trigger-icon" icon="bolt-filled" size="xsmall" />
 			<div v-if="itemCount" class="extra-info" data-test-id="run-data-schema-node-item-count">
 				{{ i18n.baseText('ndv.output.items', { interpolate: { count: itemCount } }) }}
 			</div>
@@ -55,13 +56,13 @@ const emit = defineEmits<{
 			data-test-id="schema-preview-warning"
 			@click.stop
 		>
-			<i18n-t keypath="dataMapping.schemaView.preview">
+			<I18nT keypath="dataMapping.schemaView.preview" scope="global">
 				<template #link>
 					<N8nLink :to="SCHEMA_PREVIEW_DOCS_URL" size="small" bold>
 						{{ i18n.baseText('generic.learnMore') }}
 					</N8nLink>
 				</template>
-			</i18n-t>
+			</I18nT>
 		</div>
 	</div>
 </template>
@@ -76,11 +77,13 @@ const emit = defineEmits<{
 	cursor: pointer;
 }
 .toggle {
-	width: 30px;
+	padding-left: var(--spacing-5xs);
+	padding-right: var(--spacing-3xs);
 	height: 30px;
 	display: flex;
 	justify-content: center;
 	align-items: center;
+	color: var(--color-text-light);
 }
 .collapse-icon {
 	transition: transform 0.2s cubic-bezier(0.19, 1, 0.22, 1);
@@ -124,6 +127,7 @@ const emit = defineEmits<{
 	font-size: var(--font-size-2xs);
 	color: var(--color-text-light);
 	margin-left: auto;
+	white-space: nowrap;
 }
 
 .notice {

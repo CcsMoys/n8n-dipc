@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import type {
-	CalloutActionType,
+	CalloutAction,
 	INodeParameters,
 	INodeProperties,
-	NodeParameterValue,
 	NodeParameterValueType,
 } from 'n8n-workflow';
-import { ADD_FORM_NOTICE, deepCopy, NodeHelpers } from 'n8n-workflow';
+import {
+	ADD_FORM_NOTICE,
+	getParameterValueByPath,
+	NodeHelpers,
+	resolveRelativePath,
+} from 'n8n-workflow';
 import { computed, defineAsyncComponent, onErrorCaptured, ref, watch, type WatchSource } from 'vue';
 
-import type { IUpdateInformation } from '@/Interface';
+import type { INodeUi, IUpdateInformation } from '@/Interface';
 
 import AssignmentCollection from '@/components/AssignmentCollection/AssignmentCollection.vue';
 import ButtonParameter from '@/components/ButtonParameter/ButtonParameter.vue';
@@ -19,7 +23,7 @@ import MultipleParameter from '@/components/MultipleParameter.vue';
 import ParameterInputFull from '@/components/ParameterInputFull.vue';
 import ResourceMapper from '@/components/ResourceMapper/ResourceMapper.vue';
 import { useI18n } from '@n8n/i18n';
-import { useNodeHelpers } from '@/composables/useNodeHelpers';
+import { useNodeSettingsParameters } from '@/composables/useNodeSettingsParameters';
 import { useWorkflowHelpers } from '@/composables/useWorkflowHelpers';
 import { useMessage } from '@/composables/useMessage';
 import {
@@ -32,15 +36,15 @@ import {
 import { useNDVStore } from '@/stores/ndv.store';
 import { useNodeTypesStore } from '@/stores/nodeTypes.store';
 
-import {
-	getMainAuthField,
-	getNodeAuthFields,
-	isAuthRelatedParameter,
-} from '@/utils/nodeTypesUtils';
 import { captureException } from '@sentry/vue';
 import { computedWithControl } from '@vueuse/core';
 import get from 'lodash/get';
-import set from 'lodash/set';
+import { storeToRefs } from 'pinia';
+import { useCalloutHelpers } from '@/composables/useCalloutHelpers';
+import { getParameterTypeOption } from '@/utils/nodeSettingsUtils';
+import { useWorkflowsStore } from '@/stores/workflows.store';
+import type { IconName } from '@n8n/design-system/components/N8nIcon/icons';
+
 import {
 	N8nCallout,
 	N8nIcon,
@@ -49,10 +53,8 @@ import {
 	N8nLink,
 	N8nNotice,
 	N8nText,
+	N8nTooltip,
 } from '@n8n/design-system';
-import { storeToRefs } from 'pinia';
-import { useCalloutHelpers } from '@/composables/useCalloutHelpers';
-
 const LazyFixedCollectionParameter = defineAsyncComponent(
 	async () => await import('./FixedCollectionParameter.vue'),
 );
@@ -64,6 +66,7 @@ const LazyCollectionParameter = defineAsyncComponent(
 const showIssuesInLabelFor = ['fixedCollection'];
 
 type Props = {
+	node?: INodeUi;
 	nodeValues: INodeParameters;
 	parameters: INodeProperties[];
 	path?: string;
@@ -83,14 +86,21 @@ const emit = defineEmits<{
 
 const nodeTypesStore = useNodeTypesStore();
 const ndvStore = useNDVStore();
+const workflowsStore = useWorkflowsStore();
 
 const message = useMessage();
-const nodeHelpers = useNodeHelpers();
+const nodeSettingsParameters = useNodeSettingsParameters();
 const asyncLoadingError = ref(false);
 const workflowHelpers = useWorkflowHelpers();
 const i18n = useI18n();
-const { dismissCallout, isCalloutDismissed, openRagStarterTemplate, isRagStarterCalloutVisible } =
-	useCalloutHelpers();
+const {
+	dismissCallout,
+	isCalloutDismissed,
+	openPreBuiltAgentsCollection,
+	openSampleWorkflowTemplate,
+	isRagStarterCalloutVisible,
+	isPreBuiltAgentsCalloutVisible,
+} = useCalloutHelpers();
 
 const { activeNode } = storeToRefs(ndvStore);
 
@@ -113,6 +123,8 @@ onErrorCaptured((e, component) => {
 	return false;
 });
 
+const node = computed(() => props.node ?? ndvStore.activeNode);
+
 const nodeType = computed(() => {
 	if (node.value) {
 		return nodeTypesStore.getNodeType(node.value.type, node.value.typeVersion);
@@ -124,25 +136,23 @@ const filteredParameters = computedWithControl(
 	[() => props.parameters, () => props.nodeValues] as WatchSource[],
 	() => {
 		const parameters = props.parameters.filter((parameter: INodeProperties) =>
-			displayNodeParameter(parameter),
+			shouldDisplayNodeParameter(parameter),
 		);
 
-		const activeNode = ndvStore.activeNode;
-
-		if (activeNode && activeNode.type === FORM_TRIGGER_NODE_TYPE) {
-			return updateFormTriggerParameters(parameters, activeNode.name);
+		if (node.value && node.value.type === FORM_TRIGGER_NODE_TYPE) {
+			return updateFormTriggerParameters(parameters, node.value.name);
 		}
 
-		if (activeNode && activeNode.type === FORM_NODE_TYPE) {
-			return updateFormParameters(parameters, activeNode.name);
+		if (node.value && node.value.type === FORM_NODE_TYPE) {
+			return updateFormParameters(parameters, node.value.name);
 		}
 
 		if (
-			activeNode &&
-			activeNode.type === WAIT_NODE_TYPE &&
-			activeNode.parameters.resume === 'form'
+			node.value &&
+			node.value.type === WAIT_NODE_TYPE &&
+			node.value.parameters.resume === 'form'
 		) {
-			return updateWaitParameters(parameters, activeNode.name);
+			return updateWaitParameters(parameters, node.value.name);
 		}
 
 		return parameters;
@@ -153,14 +163,12 @@ const filteredParameterNames = computed(() => {
 	return filteredParameters.value.map((parameter) => parameter.name);
 });
 
-const node = computed(() => ndvStore.activeNode);
-
-const nodeAuthFields = computed(() => {
-	return getNodeAuthFields(nodeType.value);
-});
-
 const credentialsParameterIndex = computed(() => {
 	return filteredParameters.value.findIndex((parameter) => parameter.type === 'credentials');
+});
+
+const calloutParameterIndex = computed(() => {
+	return filteredParameters.value.findIndex((parameter) => parameter.type === 'callout');
 });
 
 const indexToShowSlotAt = computed(() => {
@@ -169,6 +177,12 @@ const indexToShowSlotAt = computed(() => {
 	}
 
 	let index = 0;
+
+	// If the node has a callout don't show credentials before it
+	if (calloutParameterIndex.value !== -1) {
+		index = calloutParameterIndex.value + 1;
+	}
+
 	// For nodes that use old credentials UI, keep credentials below authentication field in NDV
 	// otherwise credentials will use auth filed position since the auth field is moved to credentials modal
 	const fieldOffset = KEEP_AUTH_IN_NDV_FOR_NODES.includes(nodeType.value?.name || '') ? 1 : 0;
@@ -181,10 +195,6 @@ const indexToShowSlotAt = computed(() => {
 	});
 
 	return Math.min(index, filteredParameters.value.length - 1);
-});
-
-const mainNodeAuthField = computed(() => {
-	return getMainAuthField(nodeType.value || null);
 });
 
 watch(filteredParameterNames, (newValue, oldValue) => {
@@ -207,12 +217,12 @@ watch(filteredParameterNames, (newValue, oldValue) => {
 });
 
 function updateFormTriggerParameters(parameters: INodeProperties[], triggerName: string) {
-	const workflow = workflowHelpers.getCurrentWorkflow();
-	const connectedNodes = workflow.getChildNodes(triggerName);
+	const workflowObject = workflowsStore.workflowObject;
+	const connectedNodes = workflowObject.getChildNodes(triggerName);
 
 	const hasFormPage = connectedNodes.some((nodeName) => {
-		const node = workflow.getNode(nodeName);
-		return node && node.type === FORM_NODE_TYPE;
+		const _node = workflowObject.getNode(nodeName);
+		return _node && _node.type === FORM_NODE_TYPE;
 	});
 
 	if (hasFormPage) {
@@ -252,19 +262,19 @@ function updateFormTriggerParameters(parameters: INodeProperties[], triggerName:
 }
 
 function updateWaitParameters(parameters: INodeProperties[], nodeName: string) {
-	const workflow = workflowHelpers.getCurrentWorkflow();
-	const parentNodes = workflow.getParentNodes(nodeName);
+	const workflowObject = workflowsStore.workflowObject;
+	const parentNodes = workflowObject.getParentNodes(nodeName);
 
 	const formTriggerName = parentNodes.find(
-		(node) => workflow.nodes[node].type === FORM_TRIGGER_NODE_TYPE,
+		(_node) => workflowObject.nodes[_node].type === FORM_TRIGGER_NODE_TYPE,
 	);
 	if (!formTriggerName) return parameters;
 
-	const connectedNodes = workflow.getChildNodes(formTriggerName);
+	const connectedNodes = workflowObject.getChildNodes(formTriggerName);
 
-	const hasFormPage = connectedNodes.some((nodeName) => {
-		const node = workflow.getNode(nodeName);
-		return node && node.type === FORM_NODE_TYPE;
+	const hasFormPage = connectedNodes.some((_nodeName) => {
+		const _node = workflowObject.getNode(_nodeName);
+		return _node && _node.type === FORM_NODE_TYPE;
 	});
 
 	if (hasFormPage) {
@@ -291,11 +301,11 @@ function updateWaitParameters(parameters: INodeProperties[], nodeName: string) {
 }
 
 function updateFormParameters(parameters: INodeProperties[], nodeName: string) {
-	const workflow = workflowHelpers.getCurrentWorkflow();
-	const parentNodes = workflow.getParentNodes(nodeName);
+	const workflowObject = workflowsStore.workflowObject;
+	const parentNodes = workflowObject.getParentNodes(nodeName);
 
 	const formTriggerName = parentNodes.find(
-		(node) => workflow.nodes[node].type === FORM_TRIGGER_NODE_TYPE,
+		(_node) => workflowObject.nodes[_node].type === FORM_TRIGGER_NODE_TYPE,
 	);
 
 	if (formTriggerName) return parameters.filter((parameter) => parameter.name !== 'triggerNotice');
@@ -322,22 +332,7 @@ function getCredentialsDependencies() {
 }
 
 function multipleValues(parameter: INodeProperties): boolean {
-	return getArgument('multipleValues', parameter) === true;
-}
-
-function getArgument(
-	argumentName: string,
-	parameter: INodeProperties,
-): string | string[] | number | boolean | undefined {
-	if (parameter.typeOptions === undefined) {
-		return undefined;
-	}
-
-	if (parameter.typeOptions[argumentName] === undefined) {
-		return undefined;
-	}
-
-	return parameter.typeOptions[argumentName];
+	return getParameterTypeOption(parameter, 'multipleValues') === true;
 }
 
 function getPath(parameterName: string): string {
@@ -355,116 +350,15 @@ function deleteOption(optionName: string): void {
 	emit('valueChanged', parameterData);
 }
 
-function mustHideDuringCustomApiCall(
-	parameter: INodeProperties,
-	nodeValues: INodeParameters,
-): boolean {
-	if (parameter?.displayOptions?.hide) return true;
-
-	const MUST_REMAIN_VISIBLE = [
-		'authentication',
-		'resource',
-		'operation',
-		...Object.keys(nodeValues),
-	];
-
-	return !MUST_REMAIN_VISIBLE.includes(parameter.name);
-}
-
-function displayNodeParameter(
+function shouldDisplayNodeParameter(
 	parameter: INodeProperties,
 	displayKey: 'displayOptions' | 'disabledOptions' = 'displayOptions',
 ): boolean {
-	if (parameter.type === 'hidden') {
-		return false;
-	}
-
-	if (
-		nodeHelpers.isCustomApiCallSelected(props.nodeValues) &&
-		mustHideDuringCustomApiCall(parameter, props.nodeValues)
-	) {
-		return false;
-	}
-
-	// Hide authentication related fields since it will now be part of credentials modal
-	if (
-		!KEEP_AUTH_IN_NDV_FOR_NODES.includes(node.value?.type || '') &&
-		mainNodeAuthField.value &&
-		(parameter.name === mainNodeAuthField.value?.name || shouldHideAuthRelatedParameter(parameter))
-	) {
-		return false;
-	}
-
-	if (parameter[displayKey] === undefined) {
-		// If it is not defined no need to do a proper check
-		return true;
-	}
-
-	const nodeValues: INodeParameters = {};
-	let rawValues = props.nodeValues;
-	if (props.path) {
-		rawValues = get(props.nodeValues, props.path) as INodeParameters;
-	}
-
-	if (!rawValues) {
-		return false;
-	}
-	// Resolve expressions
-	const resolveKeys = Object.keys(rawValues);
-	let key: string;
-	let i = 0;
-	let parameterGotResolved = false;
-	do {
-		key = resolveKeys.shift() as string;
-		const value = rawValues[key];
-		if (typeof value === 'string' && value?.charAt(0) === '=') {
-			// Contains an expression that
-			if (
-				value.includes('$parameter') &&
-				resolveKeys.some((parameterName) => value.includes(parameterName))
-			) {
-				// Contains probably an expression of a missing parameter so skip
-				resolveKeys.push(key);
-				continue;
-			} else {
-				// Contains probably no expression with a missing parameter so resolve
-				try {
-					nodeValues[key] = workflowHelpers.resolveExpression(
-						value,
-						nodeValues,
-					) as NodeParameterValue;
-				} catch (e) {
-					// If expression is invalid ignore
-					nodeValues[key] = '';
-				}
-				parameterGotResolved = true;
-			}
-		} else {
-			// Does not contain an expression, add directly
-			nodeValues[key] = rawValues[key];
-		}
-		// TODO: Think about how to calculate this best
-		if (i++ > 50) {
-			// Make sure we do not get caught
-			break;
-		}
-	} while (resolveKeys.length !== 0);
-
-	if (parameterGotResolved) {
-		if (props.path) {
-			rawValues = deepCopy(props.nodeValues);
-			set(rawValues, props.path, nodeValues);
-			return nodeHelpers.displayParameter(rawValues, parameter, props.path, node.value, displayKey);
-		} else {
-			return nodeHelpers.displayParameter(nodeValues, parameter, '', node.value, displayKey);
-		}
-	}
-
-	return nodeHelpers.displayParameter(
+	return nodeSettingsParameters.shouldDisplayNodeParameter(
 		props.nodeValues,
+		node.value,
 		parameter,
 		props.path,
-		node.value,
 		displayKey,
 	);
 }
@@ -494,26 +388,12 @@ function getParameterIssues(parameter: INodeProperties): string[] {
 	return issues.parameters?.[parameter.name] ?? [];
 }
 
-/**
- * Handles default node button parameter type actions
- * @param parameter
- */
-
-function shouldHideAuthRelatedParameter(parameter: INodeProperties): boolean {
-	// TODO: For now, hide all fields that are used in authentication fields displayOptions
-	// Ideally, we should check if any non-auth field depends on it before hiding it but
-	// since there is no such case, omitting it to avoid additional computation
-	return isAuthRelatedParameter(nodeAuthFields.value, parameter);
-}
-
 function shouldShowOptions(parameter: INodeProperties): boolean {
 	return parameter.type !== 'resourceMapper';
 }
 
 function getDependentParametersValues(parameter: INodeProperties): string | null {
-	const loadOptionsDependsOn = getArgument('loadOptionsDependsOn', parameter) as
-		| string[]
-		| undefined;
+	const loadOptionsDependsOn = getParameterTypeOption(parameter, 'loadOptionsDependsOn');
 
 	if (loadOptionsDependsOn === undefined) {
 		return null;
@@ -525,12 +405,14 @@ function getDependentParametersValues(parameter: INodeProperties): string | null
 		const resolvedNodeParameters = workflowHelpers.resolveParameter(currentNodeParameters);
 
 		const returnValues: string[] = [];
-		for (const parameterPath of loadOptionsDependsOn) {
+		for (let parameterPath of loadOptionsDependsOn) {
+			parameterPath = resolveRelativePath(props.path, parameterPath);
+
 			returnValues.push(get(resolvedNodeParameters, parameterPath) as string);
 		}
 
 		return returnValues.join('|');
-	} catch (error) {
+	} catch {
 		return null;
 	}
 }
@@ -538,11 +420,19 @@ function getDependentParametersValues(parameter: INodeProperties): string | null
 function getParameterValue<T extends NodeParameterValueType = NodeParameterValueType>(
 	name: string,
 ): T {
-	return nodeHelpers.getParameterValue(props.nodeValues, name, props.path) as T;
+	return getParameterValueByPath(props.nodeValues, name, props.path) as T;
 }
 
 function isRagStarterCallout(parameter: INodeProperties): boolean {
 	return parameter.type === 'callout' && parameter.name === 'ragStarterCallout';
+}
+
+function isAgentDefaultCallout(parameter: INodeProperties): boolean {
+	return parameter.type === 'callout' && parameter.name === 'aiAgentStarterCallout';
+}
+
+function isPreBuiltAgentsCallout(parameter: INodeProperties): boolean {
+	return parameter.type === 'callout' && parameter.name.startsWith('preBuiltAgentsCallout');
 }
 
 function isCalloutVisible(parameter: INodeProperties): boolean {
@@ -552,16 +442,42 @@ function isCalloutVisible(parameter: INodeProperties): boolean {
 		return isRagStarterCalloutVisible.value;
 	}
 
+	if (isAgentDefaultCallout(parameter)) {
+		return !isPreBuiltAgentsCalloutVisible.value;
+	}
+
+	if (isPreBuiltAgentsCallout(parameter)) {
+		return isPreBuiltAgentsCalloutVisible.value;
+	}
+
 	return true;
 }
 
-async function onCalloutAction(action: CalloutActionType) {
-	if (action === 'openRagStarterTemplate') {
-		await openRagStarterTemplate(activeNode.value?.type ?? 'no active node');
+function onCalloutAction(action: CalloutAction) {
+	switch (action.type) {
+		case 'openPreBuiltAgentsCollection':
+			void openPreBuiltAgentsCollection({
+				telemetry: {
+					source: 'ndv',
+					nodeType: activeNode.value?.type,
+				},
+				resetStacks: false,
+			});
+			break;
+		case 'openSampleWorkflowTemplate':
+			void openSampleWorkflowTemplate(action.templateId, {
+				telemetry: {
+					source: 'ndv',
+					nodeType: activeNode.value?.type,
+				},
+			});
+			break;
+		default:
+			break;
 	}
 }
 
-const onCalloutDismiss = async (parameter: INodeProperties) => {
+async function onCalloutDismiss(parameter: INodeProperties) {
 	const dismissConfirmed = await message.confirm(
 		i18n.baseText('parameterInputList.callout.dismiss.confirm.text'),
 		{
@@ -580,7 +496,7 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 	}
 
 	await dismissCallout(parameter.name);
-};
+}
 </script>
 
 <template>
@@ -623,13 +539,15 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 			<template v-else-if="parameter.type === 'callout'">
 				<N8nCallout
 					v-if="isCalloutVisible(parameter)"
+					:icon="(parameter.typeOptions?.calloutAction?.icon as IconName) || 'info'"
+					icon-size="large"
 					:class="['parameter-item', parameter.typeOptions?.containerClass ?? '']"
 					theme="secondary"
 				>
 					<N8nText size="small">
 						<N8nText
-							size="small"
 							v-n8n-html="i18n.nodeText(activeNode?.type).inputLabelDisplayName(parameter, path)"
+							size="small"
 						/>
 						<template v-if="parameter.typeOptions?.calloutAction">
 							{{ ' ' }}
@@ -639,7 +557,7 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 								size="small"
 								:bold="true"
 								:underline="true"
-								@click="onCalloutAction(parameter.typeOptions.calloutAction.type)"
+								@click="onCalloutAction(parameter.typeOptions.calloutAction)"
 							>
 								{{ parameter.typeOptions.calloutAction.label }}
 							</N8nLink>
@@ -648,7 +566,7 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 
 					<template #trailingContent>
 						<N8nIcon
-							icon="times"
+							icon="x"
 							title="Dismiss"
 							size="medium"
 							type="secondary"
@@ -695,7 +613,7 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 									issue
 								}}</span>
 							</template>
-							<N8nIcon icon="exclamation-triangle" size="small" color="danger" />
+							<N8nIcon icon="triangle-alert" size="small" color="danger" />
 						</N8nTooltip>
 					</template>
 				</N8nInputLabel>
@@ -722,21 +640,21 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 					</template>
 					<template #fallback>
 						<N8nText size="small" class="async-notice">
-							<N8nIcon icon="sync-alt" size="xsmall" :spin="true" />
+							<N8nIcon icon="refresh-cw" size="xsmall" :spin="true" />
 							{{ i18n.baseText('parameterInputList.loadingFields') }}
 						</N8nText>
 					</template>
 				</Suspense>
 				<N8nText v-else size="small" color="danger" class="async-notice">
-					<N8nIcon icon="exclamation-triangle" size="xsmall" />
+					<N8nIcon icon="triangle-alert" size="xsmall" />
 					{{ i18n.baseText('parameterInputList.loadingError') }}
 				</N8nText>
 				<N8nIconButton
 					v-if="hideDelete !== true && !isReadOnly && !parameter.isNodeSetting"
 					type="tertiary"
 					text
-					size="mini"
-					icon="trash"
+					size="small"
+					icon="trash-2"
 					class="icon-button"
 					:title="i18n.baseText('parameterInputList.delete')"
 					@click="deleteOption(parameter.name)"
@@ -749,6 +667,7 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 				:path="getPath(parameter.name)"
 				:dependent-parameters-values="getDependentParametersValues(parameter)"
 				:is-read-only="isReadOnly"
+				:allow-empty-strings="parameter.typeOptions?.resourceMapper?.allowEmptyValues"
 				input-size="small"
 				label-size="small"
 				@value-changed="valueChanged"
@@ -778,8 +697,8 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 					v-if="hideDelete !== true && !isReadOnly && !parameter.isNodeSetting"
 					type="tertiary"
 					text
-					size="mini"
-					icon="trash"
+					size="small"
+					icon="trash-2"
 					class="icon-button"
 					:title="i18n.baseText('parameterInputList.delete')"
 					@click="deleteOption(parameter.name)"
@@ -793,7 +712,7 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 					:path="getPath(parameter.name)"
 					:is-read-only="
 						isReadOnly ||
-						(parameter.disabledOptions && displayNodeParameter(parameter, 'disabledOptions'))
+						(parameter.disabledOptions && shouldDisplayNodeParameter(parameter, 'disabledOptions'))
 					"
 					:hide-label="false"
 					:node-values="nodeValues"
@@ -814,8 +733,8 @@ const onCalloutDismiss = async (parameter: INodeProperties) => {
 	.icon-button {
 		position: absolute;
 		opacity: 0;
-		top: 0;
-		left: calc(-0.5 * var(--spacing-2xs));
+		top: -3px;
+		left: calc(-0.5 * var(--spacing-xs));
 		transition: opacity 100ms ease-in;
 		Button {
 			color: var(--color-icon-base);

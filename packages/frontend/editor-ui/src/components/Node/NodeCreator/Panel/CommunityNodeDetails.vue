@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import NodeIcon from '@/components/NodeIcon.vue';
 import { useViewStacks } from '../composables/useViewStacks';
 import { useUsersStore } from '@/stores/users.store';
 import { useCommunityNodesStore } from '@/stores/communityNodes.store';
@@ -14,8 +15,7 @@ import { getNodeIconSource } from '@/utils/nodeIcon';
 
 import { prepareCommunityNodeDetailsViewStack, removePreviewToken } from '../utils';
 
-import { N8nText } from '@n8n/design-system';
-
+import { N8nButton, N8nIcon, N8nText, N8nTooltip } from '@n8n/design-system';
 const {
 	activeViewStack,
 	pushViewStack,
@@ -130,11 +130,7 @@ const onInstall = async () => {
 			</div>
 			<div>
 				<div v-if="communityNodeDetails.installed" :class="$style.installed">
-					<FontAwesomeIcon
-						v-if="!communityNodeDetails.official"
-						:class="$style.installedIcon"
-						icon="cube"
-					/>
+					<N8nIcon v-if="!communityNodeDetails.official" :class="$style.installedIcon" icon="box" />
 					<N8nText color="text-light" size="small" bold>
 						{{ i18n.baseText('communityNodeDetails.installed') }}
 					</N8nText>

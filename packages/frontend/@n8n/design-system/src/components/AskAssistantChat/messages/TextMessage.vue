@@ -4,11 +4,12 @@ import { computed } from 'vue';
 import BaseMessage from './BaseMessage.vue';
 import { useMarkdown } from './useMarkdown';
 import { useI18n } from '../../../composables/useI18n';
-import type { ChatUI } from '../../../types/assistant';
+import type { ChatUI, RatingFeedback } from '../../../types/assistant';
 import BlinkingCursor from '../../BlinkingCursor/BlinkingCursor.vue';
+import N8nButton from '../../N8nButton';
 
 interface Props {
-	message: ChatUI.TextMessage & { id: string; read: boolean; quickReplies?: ChatUI.QuickReply[] };
+	message: ChatUI.TextMessage & { quickReplies?: ChatUI.QuickReply[] };
 	isFirstOfRole: boolean;
 	user?: {
 		firstName: string;
@@ -16,9 +17,14 @@ interface Props {
 	};
 	streaming?: boolean;
 	isLastMessage?: boolean;
+	color?: string;
 }
 
 defineProps<Props>();
+
+const emit = defineEmits<{
+	feedback: [RatingFeedback];
+}>();
 const { renderMarkdown } = useMarkdown();
 const { t } = useI18n();
 
@@ -37,38 +43,44 @@ async function onCopyButtonClick(content: string, e: MouseEvent) {
 </script>
 
 <template>
-	<BaseMessage :message="message" :is-first-of-role="isFirstOfRole" :user="user">
+	<BaseMessage
+		:message="message"
+		:is-first-of-role="isFirstOfRole"
+		:user="user"
+		@feedback="(feedback) => emit('feedback', feedback)"
+	>
 		<div :class="$style.textMessage">
 			<span
 				v-if="message.role === 'user'"
 				v-n8n-html="renderMarkdown(message.content)"
-				:class="$style['rendered-content']"
+				:class="$style.renderedContent"
 			></span>
 			<div
 				v-else
 				v-n8n-html="renderMarkdown(message.content)"
-				:class="[$style.assistantText, $style['rendered-content']]"
+				:class="[$style.assistantText, $style.renderedContent]"
+				:style="color ? { color } : undefined"
 			></div>
 			<div
 				v-if="message?.codeSnippet"
-				:class="$style['code-snippet']"
+				:class="$style.codeSnippet"
 				data-test-id="assistant-code-snippet"
 			>
 				<header v-if="isClipboardSupported">
-					<n8n-button
+					<N8nButton
 						type="tertiary"
-						text="true"
+						:text="true"
 						size="mini"
 						data-test-id="assistant-copy-snippet-button"
 						@click="onCopyButtonClick(message.codeSnippet, $event)"
 					>
 						{{ t('assistantChat.copy') }}
-					</n8n-button>
+					</N8nButton>
 				</header>
 				<div
 					v-n8n-html="renderMarkdown(message.codeSnippet).trim()"
 					data-test-id="assistant-code-snippet-content"
-					:class="[$style['snippet-content'], $style['rendered-content']]"
+					:class="[$style.snippetContent, $style.renderedContent]"
 				></div>
 			</div>
 			<BlinkingCursor v-if="streaming && isLastMessage && message.role === 'assistant'" />
@@ -82,10 +94,11 @@ async function onCopyButtonClick(content: string, e: MouseEvent) {
 	flex-direction: column;
 	gap: var(--spacing-xs);
 	font-size: var(--font-size-2xs);
+	line-height: 1.6;
 	word-break: break-word;
 }
 
-.code-snippet {
+.codeSnippet {
 	position: relative;
 	border: var(--border-base);
 	background-color: var(--color-foreground-xlight);
@@ -108,7 +121,7 @@ async function onCopyButtonClick(content: string, e: MouseEvent) {
 		}
 	}
 
-	.snippet-content {
+	.snippetContent {
 		padding: var(--spacing-2xs);
 	}
 
@@ -127,7 +140,7 @@ async function onCopyButtonClick(content: string, e: MouseEvent) {
 	flex-direction: column;
 }
 
-.rendered-content {
+.renderedContent {
 	p {
 		margin: 0;
 		margin: var(--spacing-4xs) 0;
@@ -151,6 +164,10 @@ async function onCopyButtonClick(content: string, e: MouseEvent) {
 	ul,
 	ol {
 		margin: var(--spacing-4xs) 0 var(--spacing-4xs) var(--spacing-l);
+
+		li {
+			margin-bottom: var(--spacing-5xs);
+		}
 
 		ul,
 		ol {

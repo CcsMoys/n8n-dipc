@@ -33,7 +33,7 @@ export function mapLegacyConnectionsToCanvasConnections(
 				toPorts?.forEach((toPort) => {
 					const toNodeName = toPort.node;
 					const toId = nodes.find((node) => node.name === toNodeName)?.id ?? '';
-					const toConnectionType = toPort.type as NodeConnectionType;
+					const toConnectionType = toPort.type;
 					const toIndex = toPort.index;
 
 					const sourceHandle = createCanvasConnectionHandleString({
@@ -262,4 +262,12 @@ export function insertSpacersBetweenEndpoints<T>(endpoints: T[], requiredEndpoin
 	}
 
 	return endpointsWithSpacers;
+}
+
+export function shouldIgnoreCanvasShortcut(el: Element): boolean {
+	return (
+		['INPUT', 'TEXTAREA'].includes(el.tagName) ||
+		el.closest('[contenteditable]') !== null ||
+		el.closest('.ignore-key-press-canvas') !== null
+	);
 }

@@ -7,6 +7,10 @@ import {
 	EVALUATION_NODE_TYPE,
 	EVALUATION_TRIGGER_NODE_TYPE,
 	ExecutionCancelledError,
+	NodeConnectionTypes,
+	metricRequiresModelConnection,
+	DEFAULT_EVALUATION_METRIC,
+	ManualExecutionCancelledError,
 } from 'n8n-workflow';
 import type {
 	IDataObject,
@@ -31,6 +35,7 @@ import { Telemetry } from '@/telemetry';
 import { WorkflowRunner } from '@/workflow-runner';
 
 import { EvaluationMetrics } from './evaluation-metrics.ee';
+import { JsonObject } from 'openid-client';
 
 export interface TestRunMetadata {
 	testRunId: string;
@@ -83,12 +88,22 @@ export class TestRunnerService {
 			throw new TestRunError('EVALUATION_TRIGGER_NOT_FOUND');
 		}
 
-		if (
-			!triggerNode.credentials ||
-			!checkNodeParameterNotEmpty(triggerNode.parameters?.documentId) ||
-			!checkNodeParameterNotEmpty(triggerNode.parameters?.sheetName)
-		) {
-			throw new TestRunError('EVALUATION_TRIGGER_NOT_CONFIGURED', { node_name: triggerNode.name });
+		const { parameters, credentials, name, typeVersion } = triggerNode;
+		const source = parameters?.source
+			? (parameters.source as string)
+			: typeVersion >= 4.7
+				? 'dataTable'
+				: 'googleSheets';
+
+		const isConfigured =
+			source === 'dataTable'
+				? checkNodeParameterNotEmpty(parameters?.dataTableId)
+				: !!credentials &&
+					checkNodeParameterNotEmpty(parameters?.documentId) &&
+					checkNodeParameterNotEmpty(parameters?.sheetName);
+
+		if (!isConfigured) {
+			throw new TestRunError('EVALUATION_TRIGGER_NOT_CONFIGURED', { node_name: name });
 		}
 
 		if (triggerNode?.disabled) {
@@ -100,21 +115,56 @@ export class TestRunnerService {
 	 * Checks if the Evaluation Set Metrics nodes are present in the workflow
 	 * and are configured correctly.
 	 */
+	private hasModelNodeConnected(workflow: IWorkflowBase, targetNodeName: string): boolean {
+		// Check if there's a node connected to the target node via ai_languageModel connection type
+		return Object.keys(workflow.connections).some((sourceNodeName) => {
+			const connections = workflow.connections[sourceNodeName];
+			return connections?.[NodeConnectionTypes.AiLanguageModel]?.[0]?.some(
+				(connection) => connection.node === targetNodeName,
+			);
+		});
+	}
+
 	private validateSetMetricsNodes(workflow: IWorkflowBase) {
 		const metricsNodes = TestRunnerService.getEvaluationMetricsNodes(workflow);
 		if (metricsNodes.length === 0) {
 			throw new TestRunError('SET_METRICS_NODE_NOT_FOUND');
 		}
 
-		const unconfiguredMetricsNode = metricsNodes.find(
-			(node) =>
-				!node.parameters ||
-				!node.parameters.metrics ||
-				(node.parameters.metrics as AssignmentCollectionValue).assignments?.length === 0 ||
-				(node.parameters.metrics as AssignmentCollectionValue).assignments?.some(
-					(assignment) => !assignment.name || assignment.value === null,
-				),
-		);
+		const unconfiguredMetricsNode = metricsNodes.find((node) => {
+			if (node.disabled === true || !node.parameters) {
+				return true;
+			}
+
+			// Check customMetrics configuration if:
+			// - Version 4.7+ and metric is 'customMetrics'
+			// - Version < 4.7 (customMetrics is default)
+			const isCustomMetricsMode =
+				node.typeVersion >= 4.7 ? node.parameters.metric === 'customMetrics' : true;
+
+			if (isCustomMetricsMode) {
+				return (
+					!node.parameters.metrics ||
+					(node.parameters.metrics as AssignmentCollectionValue).assignments?.length === 0 ||
+					(node.parameters.metrics as AssignmentCollectionValue).assignments?.some(
+						(assignment) => !assignment.name || assignment.value === null,
+					)
+				);
+			}
+
+			// For version 4.7+, check if AI-based metrics require model connection
+			if (node.typeVersion >= 4.7) {
+				const metric = (node.parameters.metric ?? DEFAULT_EVALUATION_METRIC) as string;
+				if (
+					metricRequiresModelConnection(metric) && // See packages/workflow/src/evaluation-helpers.ts
+					!this.hasModelNodeConnected(workflow, node.name)
+				) {
+					return true;
+				}
+			}
+
+			return false;
+		});
 
 		if (unconfiguredMetricsNode) {
 			throw new TestRunError('SET_METRICS_NODE_NOT_CONFIGURED', {
@@ -130,7 +180,7 @@ export class TestRunnerService {
 	private validateSetOutputsNodes(workflow: IWorkflowBase) {
 		const setOutputsNodes = TestRunnerService.getEvaluationSetOutputsNodes(workflow);
 		if (setOutputsNodes.length === 0) {
-			throw new TestRunError('SET_OUTPUTS_NODE_NOT_FOUND');
+			return; // No outputs nodes are strictly required, so we can skip validation
 		}
 
 		const unconfiguredSetOutputsNode = setOutputsNodes.find(
@@ -203,7 +253,6 @@ export class TestRunnerService {
 				},
 			},
 			userId: metadata.userId,
-			partialExecutionVersion: 2,
 			triggerToStartFrom: {
 				name: triggerNode.name,
 			},
@@ -219,7 +268,6 @@ export class TestRunnerService {
 				},
 				manualData: {
 					userId: metadata.userId,
-					partialExecutionVersion: 2,
 					triggerToStartFrom: {
 						name: triggerNode.name,
 					},
@@ -233,7 +281,10 @@ export class TestRunnerService {
 
 		// Listen to the abort signal to stop the execution in case test run is cancelled
 		abortSignal.addEventListener('abort', () => {
-			this.activeExecutions.stopExecution(executionId);
+			this.activeExecutions.stopExecution(
+				executionId,
+				new ManualExecutionCancelledError(executionId),
+			);
 		});
 
 		// Wait for the execution to finish
@@ -280,7 +331,6 @@ export class TestRunnerService {
 				},
 			},
 			userId: metadata.userId,
-			partialExecutionVersion: 2,
 			executionData: {
 				startData: {
 					destinationNode: triggerNode.name,
@@ -290,7 +340,6 @@ export class TestRunnerService {
 				},
 				manualData: {
 					userId: metadata.userId,
-					partialExecutionVersion: 2,
 					triggerToStartFrom: {
 						name: triggerNode.name,
 					},
@@ -341,21 +390,32 @@ export class TestRunnerService {
 	/**
 	 * Get the evaluation set metrics nodes from a workflow.
 	 */
-	static getEvaluationMetricsNodes(workflow: IWorkflowBase) {
+	static getEvaluationNodes(
+		workflow: IWorkflowBase,
+		operation: 'setMetrics' | 'setOutputs' | 'setInputs',
+		{ isDefaultOperation }: { isDefaultOperation: boolean } = { isDefaultOperation: false },
+	) {
 		return workflow.nodes.filter(
-			(node) => node.type === EVALUATION_NODE_TYPE && node.parameters.operation === 'setMetrics',
+			(node) =>
+				node.type === EVALUATION_NODE_TYPE &&
+				node.disabled !== true &&
+				(node.parameters.operation === operation ||
+					(isDefaultOperation && node.parameters.operation === undefined)),
 		);
+	}
+
+	/**
+	 * Get the evaluation set metrics nodes from a workflow.
+	 */
+	static getEvaluationMetricsNodes(workflow: IWorkflowBase) {
+		return this.getEvaluationNodes(workflow, 'setMetrics');
 	}
 
 	/**
 	 * Get the evaluation set outputs nodes from a workflow.
 	 */
 	static getEvaluationSetOutputsNodes(workflow: IWorkflowBase) {
-		return workflow.nodes.filter(
-			(node) =>
-				node.type === EVALUATION_NODE_TYPE &&
-				(node.parameters.operation === 'setOutputs' || node.parameters.operation === undefined),
-		);
+		return this.getEvaluationNodes(workflow, 'setOutputs', { isDefaultOperation: true });
 	}
 
 	/**
@@ -373,13 +433,29 @@ export class TestRunnerService {
 			});
 		}
 
-		const triggerOutput = triggerOutputData?.data?.main?.[0];
+		const triggerOutput = triggerOutputData?.data?.[NodeConnectionTypes.Main]?.[0];
 
 		if (!triggerOutput || triggerOutput.length === 0) {
 			throw new TestRunError('TEST_CASES_NOT_FOUND');
 		}
 
 		return triggerOutput;
+	}
+
+	private getEvaluationData(
+		execution: IRun,
+		workflow: IWorkflowBase,
+		operation: 'setInputs' | 'setOutputs',
+	): JsonObject {
+		const evalNodes = TestRunnerService.getEvaluationNodes(workflow, operation);
+
+		return evalNodes.reduce<JsonObject>((accu, node) => {
+			const runs = execution.data.resultData.runData[node.name];
+			const data = runs?.[0]?.data?.[NodeConnectionTypes.Main]?.[0]?.[0]?.evaluationData ?? {};
+
+			Object.assign(accu, data);
+			return accu;
+		}, {});
 	}
 
 	/**
@@ -575,6 +651,9 @@ export class TestRunnerService {
 							...addedPredefinedMetrics,
 						};
 
+						const inputs = this.getEvaluationData(testCaseExecution, workflow, 'setInputs');
+						const outputs = this.getEvaluationData(testCaseExecution, workflow, 'setOutputs');
+
 						this.logger.debug(
 							'Test case metrics extracted (user-defined)',
 							addedUserDefinedMetrics,
@@ -590,6 +669,8 @@ export class TestRunnerService {
 							completedAt,
 							status: 'success',
 							metrics: combinedMetrics,
+							inputs,
+							outputs,
 						});
 					}
 				} catch (e) {

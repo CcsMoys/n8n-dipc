@@ -9,9 +9,11 @@ import WorkflowHistoryContent from '@/components/WorkflowHistory/WorkflowHistory
 import type { WorkflowHistoryActionTypes } from '@n8n/rest-api-client/api/workflowHistory';
 import { workflowVersionDataFactory } from '@/stores/__tests__/utils/workflowHistoryTestUtils';
 import type { IWorkflowDb } from '@/Interface';
+import type { IUser } from 'n8n-workflow';
+import { useProjectsStore } from '@/stores/projects.store';
 
 const actionTypes: WorkflowHistoryActionTypes = ['restore', 'clone', 'open', 'download'];
-const actions: UserAction[] = actionTypes.map((value) => ({
+const actions: Array<UserAction<IUser>> = actionTypes.map((value) => ({
 	label: value,
 	disabled: false,
 	value,
@@ -20,12 +22,17 @@ const actions: UserAction[] = actionTypes.map((value) => ({
 const renderComponent = createComponentRenderer(WorkflowHistoryContent);
 
 let pinia: ReturnType<typeof createPinia>;
+let projectsStore: ReturnType<typeof useProjectsStore>;
 let postMessageSpy: MockInstance;
 
 describe('WorkflowHistoryContent', () => {
 	beforeEach(() => {
 		pinia = createPinia();
 		setActivePinia(pinia);
+		projectsStore = useProjectsStore();
+
+		// Mock currentProjectId for all tests
+		vi.spyOn(projectsStore, 'currentProjectId', 'get').mockReturnValue('test-project-id');
 
 		postMessageSpy = vi.fn();
 		Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
@@ -83,7 +90,6 @@ describe('WorkflowHistoryContent', () => {
 		});
 
 		window.postMessage('{"command":"n8nReady"}', '*');
-
 		await waitFor(() => {
 			expect(postMessageSpy).toHaveBeenCalledWith(expect.not.stringContaining('pinData'), '*');
 		});

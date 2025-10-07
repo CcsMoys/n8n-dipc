@@ -8,11 +8,12 @@ import { LOCAL_STORAGE_MAIN_PANEL_RELATIVE_WIDTH, MAIN_NODE_PANEL_WIDTH } from '
 import { useNDVStore } from '@/stores/ndv.store';
 import { ndvEventBus } from '@/event-bus';
 import NDVFloatingNodes from '@/components/NDVFloatingNodes.vue';
-import type { MainPanelType, XYPosition } from '@/Interface';
+import type { Direction, MainPanelType, XYPosition } from '@/Interface';
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue';
 import { useUIStore } from '@/stores/ui.store';
 import { useThrottleFn } from '@vueuse/core';
 
+import { N8nResizeWrapper } from '@n8n/design-system';
 const SIDE_MARGIN = 24;
 const SIDE_PANELS_MARGIN = 80;
 const MIN_PANEL_WIDTH = 310;
@@ -151,8 +152,8 @@ const outputPanelRelativeTranslate = computed((): number => {
 	return currentRelativeLeftDelta > 0 ? currentRelativeLeftDelta : 0;
 });
 
-const supportedResizeDirections = computed((): string[] => {
-	const supportedDirections = ['right'];
+const supportedResizeDirections = computed((): Direction[] => {
+	const supportedDirections = ['right' as Direction];
 
 	if (props.isDraggable) supportedDirections.push('left');
 	return supportedDirections;
@@ -456,7 +457,7 @@ function onDragEnd() {
 
 	&.dragging {
 		border-color: var(--color-primary);
-		box-shadow: 0px 6px 16px rgba(255, 74, 51, 0.15);
+		box-shadow: 0 6px 16px rgba(255, 74, 51, 0.15);
 	}
 }
 
